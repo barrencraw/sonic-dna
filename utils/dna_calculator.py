@@ -2,9 +2,7 @@
 import os
 import json
 import re
-
-class RuleParseError(Exception):
-    pass
+from utils.errors import DNAFormatError, RuleDefinitionError
 
 class Rule:
     def __init__(self, filepath):
@@ -15,7 +13,7 @@ class Rule:
         self.prefix = self.raw.get('prefix')
         self.subvars = self.raw.get('subvars', {})
         if not self.variable or not self.prefix or not self.subvars:
-            raise RuleParseError(f"Invalid rule file: {filepath}")
+            raise RuleDefinitionError(f"Invalid rule file: {filepath}")
         # Precompute a parsing plan (list of (name, schema)) in insertion order
         self.plan = []
         for subvar_name, subvar_schema in self.subvars.items():
@@ -27,7 +25,7 @@ class Rule:
         { subvar_name: value or {child: ...}, ... }.
         """
         if not dna_string.startswith(self.prefix):
-            raise RuleParseError(f"DNA '{dna_string}' does not start with prefix '{self.prefix}'")
+            raise DNAFormatError(f"DNA '{dna_string}' does not start with prefix '{self.prefix}'")
         idx = len(self.prefix)
         values = {}
         for subvar_name, subvar_schema in self.plan:
@@ -35,7 +33,7 @@ class Rule:
             values[subvar_name] = val
         # If idx != len(dna_string), leftover characters
         if idx != len(dna_string):
-            raise RuleParseError(
+            raise DNAFormatError(
                 f"Extra characters after parsing rule '{self.variable}': "
                 f"parsed up to index {idx}, string length {len(dna_string)}"
             )
@@ -48,7 +46,7 @@ class Rule:
         dna = [self.prefix]
         for subvar_name, subvar_schema in self.plan:
             if subvar_name not in values_dict:
-                raise RuleParseError(f"Missing subvar '{subvar_name}' for rule '{self.variable}'")
+                raise RuleDefinitionError(f"Missing subvar '{subvar_name}' for rule '{self.variable}'")
             dna_part = self._serialize_subvar(subvar_schema, values_dict[subvar_name])
             dna.append(dna_part)
         return ''.join(dna)
@@ -89,11 +87,11 @@ class Rule:
             length = 1 + schema['hz_pad']
             fragment = dna[idx:idx+length]
             if len(fragment) < length:
-                raise RuleParseError(f"Unexpected end of string parsing composite at idx {idx}")
+                raise DNAFormatError(f"Unexpected end of string parsing composite at idx {idx}")
             cls = fragment[0]
             num_str = fragment[1:]
             if not num_str.isdigit():
-                raise RuleParseError(f"Expected {schema['hz_pad']} digits for hz, got '{num_str}'")
+                raise DNAFormatError(f"Expected {schema['hz_pad']} digits for hz, got '{num_str}'")
             return {'band': cls, 'hz': int(num_str)}, idx + length
 
         # 2) Composite FM: index_pad digits + rate_class letter + links_pad digits
@@ -103,12 +101,12 @@ class Rule:
             total_len = ip + 1 + lp
             fragment = dna[idx:idx+total_len]
             if len(fragment) < total_len:
-                raise RuleParseError(f"Unexpected end parsing FM composite at idx {idx}")
+                raise DNAFormatError(f"Unexpected end parsing FM composite at idx {idx}")
             num_index = fragment[0:ip]
             rate_letter = fragment[ip]
             num_links = fragment[ip+1: ip+1+lp]
             if not (num_index.isdigit() and num_links.isdigit()):
-                raise RuleParseError(f"FM composite numeric parse error at idx {idx}")
+                raise DNAFormatError(f"FM composite numeric parse error at idx {idx}")
             return {
                 'index': int(num_index),
                 'rate': rate_letter,
@@ -122,11 +120,11 @@ class Rule:
             length = 1 + pad
             fragment = dna[idx:idx+length]
             if len(fragment) < length:
-                raise RuleParseError(f"Unexpected end parsing signed numeric at idx {idx}")
+                raise DNAFormatError(f"Unexpected end parsing signed numeric at idx {idx}")
             sign_char = fragment[0]
             num_str = fragment[1:]
             if not num_str.isdigit():
-                raise RuleParseError(f"Expected {pad} digits, got '{num_str}'")
+                raise DNAFormatError(f"Expected {pad} digits, got '{num_str}'")
             val = int(num_str)
             return {'sign': sign_char, 'value': val}, idx + length
 
@@ -136,7 +134,7 @@ class Rule:
             pad = schema['pad']
             fragment = dna[idx:idx+pad]
             if len(fragment) < pad or not fragment.isdigit():
-                raise RuleParseError(f"Unexpected numeric parse at idx {idx}: got '{fragment}'")
+                raise DNAFormatError(f"Unexpected numeric parse at idx {idx}: got '{fragment}'")
             return int(fragment), idx + pad
 
         # 5) Pure class(es): single-letter or multi-letter (class or class_order)
@@ -151,7 +149,7 @@ class Rule:
             length = len(first_code)
             fragment = dna[idx:idx+length]
             if len(fragment) < length:
-                raise RuleParseError(f"Unexpected end parsing class at idx {idx}")
+                raise DNAFormatError(f"Unexpected end parsing class at idx {idx}")
             return fragment, idx + length
 
         # Catch-all: numeric-only with min,max,pad
@@ -159,11 +157,11 @@ class Rule:
             pad = schema['pad']
             fragment = dna[idx:idx+pad]
             if len(fragment) < pad or not fragment.isdigit():
-                raise RuleParseError(f"Numeric field parse error at idx {idx}: got '{fragment}'")
+                raise DNAFormatError(f"Numeric field parse error at idx {idx}: got '{fragment}'")
             return int(fragment), idx + pad
 
         # Should not get here
-        raise RuleParseError(f"Unrecognized leaf schema at idx {idx}: {schema}")
+        raise RuleDefinitionError(f"Unrecognized leaf schema at idx {idx}: {schema}")
 
     def _serialize_subvar(self, schema, value):
         """
@@ -179,7 +177,7 @@ class Rule:
         parts = []
         for child_name, child_schema in schema.items():
             if child_name not in value:
-                raise RuleParseError(f"Missing nested '{child_name}' in value {value}")
+                raise RuleDefinitionError(f"Missing nested '{child_name}' in value {value}")
             parts.append(self._serialize_subvar(child_schema, value[child_name]))
         return ''.join(parts)
 
@@ -192,7 +190,7 @@ class Rule:
             cls = value.get('band')
             hz = value.get('hz')
             if cls is None or hz is None:
-                raise RuleParseError(f"Expected 'band' and 'hz' in {value}")
+                raise RuleDefinitionError(f"Expected 'band' and 'hz' in {value}")
             hz_pad = schema['hz_pad']
             return f"{cls}{str(hz).zfill(hz_pad)}"
 
@@ -204,7 +202,7 @@ class Rule:
             rate = value.get('rate')
             links = value.get('links')
             if idx_num is None or rate is None or links is None:
-                raise RuleParseError(f"Expected 'index', 'rate', 'links' in {value}")
+                raise RuleDefinitionError(f"Expected 'index', 'rate', 'links' in {value}")
             return f"{str(idx_num).zfill(ip)}{rate}{str(links).zfill(lp)}"
 
         # 3) Sign + numeric
@@ -212,7 +210,7 @@ class Rule:
             sign_char = value.get('sign')
             num = value.get('value')
             if sign_char is None or num is None:
-                raise RuleParseError(f"Expected dict with 'sign' and 'value' for {schema}")
+                raise RuleDefinitionError(f"Expected dict with 'sign' and 'value' for {schema}")
             pad = schema['pad']
             return f"{sign_char}{str(num).zfill(pad)}"
 
@@ -220,7 +218,7 @@ class Rule:
         if 'min' in schema and 'max' in schema and 'pad' in schema and 'band_class' not in schema and 'index_min' not in schema:
             pad = schema['pad']
             if not isinstance(value, int):
-                raise RuleParseError(f"Expected int for numeric field, got {value}")
+                raise RuleDefinitionError(f"Expected int for numeric field, got {value}")
             return str(value).zfill(pad)
 
         # 5) Pure class (class or class_order)
@@ -228,7 +226,7 @@ class Rule:
             # Value should be a string of correct length
             class_order = schema.get('class') or schema.get('class_order')
             if not isinstance(value, str):
-                raise RuleParseError(f"Expected str for class field, got {value}")
+                raise RuleDefinitionError(f"Expected str for class field, got {value}")
             # Check length matches first code length
             if '–' in class_order:
                 codes = class_order.split('–')
@@ -237,11 +235,11 @@ class Rule:
             first_code = codes[0]
             needed = len(first_code)
             if len(value) != needed:
-                raise RuleParseError(f"Expected class of length {needed}, got '{value}'")
+                raise RuleDefinitionError(f"Expected class of length {needed}, got '{value}'")
             return value
 
         # Should not get here
-        raise RuleParseError(f"Cannot serialize leaf schema: {schema}")
+        raise RuleDefinitionError(f"Cannot serialize leaf schema: {schema}")
 
 
 class DNACalculator:
@@ -260,7 +258,7 @@ class DNACalculator:
                 path = os.path.join(folder, fname)
                 rule = Rule(path)
                 if rule.prefix in self.rules:
-                    raise RuleParseError(f"Duplicate prefix '{rule.prefix}' in {fname}")
+                    raise RuleDefinitionError(f"Duplicate prefix '{rule.prefix}' in {fname}")
                 self.rules[rule.prefix] = rule
 
     def parse(self, dna_string):
@@ -273,7 +271,7 @@ class DNACalculator:
             if dna_string.startswith(prefix):
                 parsed = rule.parse(dna_string)
                 return {'rule': rule.variable, 'values': parsed}
-        raise RuleParseError(f"No matching rule for DNA '{dna_string}'")
+        raise DNAFormatError(f"No matching rule for DNA '{dna_string}'")
 
     def serialize(self, variable_name, values_dict):
         """
@@ -283,4 +281,4 @@ class DNACalculator:
         for rule in self.rules.values():
             if rule.variable == variable_name:
                 return rule.serialize(values_dict)
-        raise RuleParseError(f"No rule found for variable '{variable_name}'")
+        raise RuleDefinitionError(f"No rule found for variable '{variable_name}'")
