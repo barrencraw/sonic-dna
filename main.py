@@ -35,6 +35,7 @@ import argparse
 
 # ─── Import the batch parser and the GUI window ───────────────────────────────
 from utils.dna_ui import main as run_batch
+from utils.providers import RngProvider
 from PySide6.QtWidgets import QApplication
 from ui.main_window import MainWindow
 
@@ -169,7 +170,11 @@ def main():
     os.chdir(script_dir)
 
     app = QApplication(sys.argv)
-    win = MainWindow()
+
+    # Initialize Determinism Providers
+    rng = RngProvider()  # Default non-deterministic for normal usage, or seed if needed
+
+    win = MainWindow(rng=rng)
     win.show()
     sys.exit(app.exec())
 

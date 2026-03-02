@@ -9,8 +9,9 @@ from ui.music_panel import MusicPanel
 
 
 class MainWindow(QMainWindow):
-    def __init__(self):
+    def __init__(self, rng=None):
         super().__init__()
+        self.rng = rng
         self.setWindowTitle("ToonGloom Studio – Phase 0")
         self.resize(900, 600)
 
@@ -68,6 +69,6 @@ class MainWindow(QMainWindow):
     def show_music_panel(self):
         print("Switching to MusicPanel")
         if self.music_panel is None:
-            self.music_panel = MusicPanel()
+            self.music_panel = MusicPanel(rng=self.rng)
             self.stacked.addWidget(self.music_panel)
         self.stacked.setCurrentWidget(self.music_panel)
