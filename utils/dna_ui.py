@@ -2,7 +2,8 @@
 import os
 import json
 import csv
-from utils.dna_calculator import DNACalculator
+import time
+from utils.dna_calculator import DNACalculator, RuleParseError
 
 def ensure_folder(path):
     if not os.path.isdir(path):
@@ -49,12 +50,25 @@ class RuleLoadError(DNAProcessingError):
 class PersistenceError(DNAProcessingError):
     """Raised when writing or moving output files fails."""
     pass
+def load_ledger(ledger_path):
+    if os.path.exists(ledger_path):
+        try:
+            with open(ledger_path, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    return {}
+
+def save_ledger(ledger_path, ledger):
+    with open(ledger_path, 'w', encoding='utf-8') as f:
+        json.dump(ledger, f, indent=2)
 
 def main():
     # Determine file paths
     project_root = os.getcwd()
     raw_folder = os.path.join(project_root, 'data', 'raw')
     output_folder = os.path.join(project_root, 'data', 'output')
+    ledger_path = os.path.join(project_root, 'data', 'processed_ledger.json')
     ensure_folder(output_folder)
 
     input_file = os.path.join(raw_folder, 'toSequence.txt')
@@ -78,14 +92,45 @@ def main():
         print("[WARN] No DNA strings found in toSequence.txt")
         return
 
-    # Prepare outputs
+    ledger = load_ledger(ledger_path)
+
+    # 1) Load existing JSON output
+    json_output_path = os.path.join(output_folder, 'toSequence_parsed.json')
     parsed_json = []
+    if os.path.exists(json_output_path):
+        try:
+            with open(json_output_path, 'r', encoding='utf-8') as jf:
+                parsed_json = json.load(jf)
+                if not isinstance(parsed_json, list):
+                    parsed_json = []
+        except Exception:
+            parsed_json = []
+
+    # 2) Load existing CSV rows
+    csv_output_path = os.path.join(output_folder, 'toSequence_parsed.csv')
     csv_rows = []
     all_flattened_keys = set()
+    if os.path.exists(csv_output_path):
+        try:
+            with open(csv_output_path, 'r', encoding='utf-8') as cf:
+                reader = csv.DictReader(cf)
+                if reader.fieldnames:
+                    all_flattened_keys = set(reader.fieldnames)
+                    csv_rows = list(reader)
+        except Exception:
+            pass
 
     from utils.dna_calculator import RuleParseError
 
+    new_processed_count = 0
     for dna_str in dna_list:
+        idempotency_key = dna_str
+        if idempotency_key in ledger:
+            print(f"[Idempotency] key={idempotency_key} dedupe_hit=True terminal_outcome={ledger[idempotency_key]['terminal_outcome']}")
+            continue
+
+        print(f"[Idempotency] key={idempotency_key} dedupe_hit=False terminal_outcome=processing")
+
         try:
             result = calculator.parse(dna_str)
             entry = {
@@ -101,6 +146,7 @@ def main():
             flat['rule'] = result['rule']
             csv_rows.append(flat)
             all_flattened_keys.update(flat.keys())
+            outcome = "success"
 
         except RuleParseError as e:
             # On parse error, record as error entry
@@ -112,6 +158,7 @@ def main():
             flat = {'dna': dna_str, 'error': str(e)}
             csv_rows.append(flat)
             all_flattened_keys.update(flat.keys())
+            outcome = f"error: {str(e)}"
 
     # ATOMIC WRITE PATTERN:
     # 1. Write to a temporary directory in the same filesystem as the output folder
@@ -152,6 +199,32 @@ def main():
             raise PersistenceError("Failed to write output files atomically") from e
 
     print(f"[OK] Parsed {len(dna_list)} DNA strings.")
+        ledger[idempotency_key] = {
+            'terminal_outcome': outcome,
+            'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
+        }
+        print(f"[Idempotency] key={idempotency_key} dedupe_hit=False terminal_outcome={outcome}")
+        new_processed_count += 1
+
+    if new_processed_count > 0:
+        # Save ledger
+        save_ledger(ledger_path, ledger)
+
+        # Write JSON output
+        with open(json_output_path, 'w', encoding='utf-8') as jf:
+            json.dump(parsed_json, jf, indent=2)
+
+        # Write CSV output
+        fieldnames = sorted(all_flattened_keys)
+        with open(csv_output_path, 'w', newline='', encoding='utf-8') as cf:
+            writer = csv.DictWriter(cf, fieldnames=fieldnames)
+            writer.writeheader()
+            for row in csv_rows:
+                # Ensure every field in fieldnames
+                out = {k: row.get(k, '') for k in fieldnames}
+                writer.writerow(out)
+
+    print(f"[OK] Processed {new_processed_count} new DNA strings. Total in ledger: {len(ledger)}")
     print(f"     JSON → {json_output_path}")
     print(f"     CSV  → {csv_output_path}")
 
