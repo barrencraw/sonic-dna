@@ -1,5 +1,8 @@
 import numpy as np
-import sounddevice as sd
+try:
+    import sounddevice as sd
+except OSError:
+    sd = None
 from scipy.io.wavfile import write as write_wav
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
@@ -36,8 +39,13 @@ BASE_SOUNDS = [
     "Grey Noise"
 ]
 
-def gen_wave(wave_type, volume=0.8):
+def gen_wave(wave_type, volume=0.8, rng=None):
     t = np.linspace(0, DURATION, int(SAMPLE_RATE * DURATION), endpoint=False)
+
+    if rng is None:
+        from utils.providers import RngProvider
+        rng = RngProvider()
+
     if wave_type == "Sine Wave":
         return volume * np.sin(2 * np.pi * FREQ * t)
     elif wave_type == "Square Wave":
@@ -81,34 +89,34 @@ def gen_wave(wave_type, volume=0.8):
     elif wave_type == "Sample & Hold":
         steps = 32
         step_len = len(t) // steps
-        vals = np.random.uniform(-1, 1, steps)
+        vals = rng.uniform(-1, 1, steps)
         data = np.repeat(vals, step_len)
         data = np.pad(data, (0, len(t) - len(data)))
         return volume * data
     elif wave_type == "Stepped Random":
         steps = 16
         idx = np.floor(np.linspace(0, steps, len(t))).astype(int)
-        vals = np.random.uniform(-1, 1, steps+1)
+        vals = rng.uniform(-1, 1, steps+1)
         return volume * vals[idx]
     elif wave_type == "Linear Chirp":
         f0, f1 = 220, 1760
         chirp = np.sin(2 * np.pi * (f0 + (f1 - f0) * t / DURATION / 2) * t)
         return volume * chirp
     elif wave_type == "White Noise":
-        return volume * np.random.uniform(-1, 1, len(t))
+        return volume * rng.uniform(-1, 1, len(t))
     elif wave_type == "Pink Noise":
         nrows, ncols = 16, len(t)
-        array = np.random.randn(nrows, ncols)
+        array = rng.standard_normal((nrows, ncols))
         array = np.cumsum(array, axis=0)
         pink = array[-1] / np.max(np.abs(array[-1]))
         return volume * pink
     elif wave_type == "Brown Noise":
-        wn = np.random.uniform(-1, 1, len(t))
+        wn = rng.uniform(-1, 1, len(t))
         brown = np.cumsum(wn)
         brown = brown / np.max(np.abs(brown))
         return volume * brown
     elif wave_type == "Blue Noise":
-        white = np.random.normal(0, 1, len(t))
+        white = rng.normal(0, 1, len(t))
         fft = np.fft.rfft(white)
         freqs = np.fft.rfftfreq(len(white), 1 / SAMPLE_RATE)
         fft *= np.sqrt(freqs)
@@ -116,7 +124,7 @@ def gen_wave(wave_type, volume=0.8):
         blue = blue / np.max(np.abs(blue))
         return volume * blue
     elif wave_type == "Violet Noise":
-        white = np.random.normal(0, 1, len(t))
+        white = rng.normal(0, 1, len(t))
         fft = np.fft.rfft(white)
         freqs = np.fft.rfftfreq(len(white), 1 / SAMPLE_RATE)
         fft *= freqs
@@ -124,7 +132,7 @@ def gen_wave(wave_type, volume=0.8):
         violet = violet / np.max(np.abs(violet))
         return volume * violet
     elif wave_type == "Grey Noise":
-        white = np.random.normal(0, 1, len(t))
+        white = rng.normal(0, 1, len(t))
         eq_curve = np.linspace(0.6, 1.2, len(white))
         return volume * (white * eq_curve / np.max(np.abs(white * eq_curve)))
     else:
@@ -156,8 +164,9 @@ class WaveformWidget(QWidget):
             qp.drawLine(x0, y0, x1, y1)
 
 class MusicPanel(QWidget):
-    def __init__(self):
+    def __init__(self, rng=None):
         super().__init__()
+        self.rng = rng
         layout = QVBoxLayout(self)
 
         # Dropdown for sound selection
@@ -193,7 +202,7 @@ class MusicPanel(QWidget):
 
     def update_waveform(self):
         wave_type = self.sound_selector.currentText()
-        data = gen_wave(wave_type)
+        data = gen_wave(wave_type, rng=self.rng)
         self.current_wave = data
         self.waveform.set_wave(data)
         if self.is_playing:
@@ -203,11 +212,15 @@ class MusicPanel(QWidget):
         if not self.is_playing:
             self.is_playing = True
             self.play_btn.setText("Pause")
-            sd.play(self.current_wave, samplerate=SAMPLE_RATE)
+            if sd:
+                sd.play(self.current_wave, samplerate=SAMPLE_RATE)
+            else:
+                print("Sounddevice not available, cannot play.")
         else:
             self.is_playing = False
             self.play_btn.setText("Play")
-            sd.stop()
+            if sd:
+                sd.stop()
 
     def download_wave(self):
         if self.current_wave is not None:
