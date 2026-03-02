@@ -4,6 +4,11 @@ import json
 import re
 
 class RuleParseError(Exception):
+    """Raised when parsing a DNA string fails or a rule is invalid."""
+    pass
+
+class RuleSchemaError(RuleParseError):
+    """Raised when a rule JSON schema is invalid."""
     pass
 
 class Rule:
@@ -15,7 +20,7 @@ class Rule:
         self.prefix = self.raw.get('prefix')
         self.subvars = self.raw.get('subvars', {})
         if not self.variable or not self.prefix or not self.subvars:
-            raise RuleParseError(f"Invalid rule file: {filepath}")
+            raise RuleSchemaError(f"Invalid rule file: {filepath}. Missing required keys (variable, prefix, subvars).")
         # Precompute a parsing plan (list of (name, schema)) in insertion order
         self.plan = []
         for subvar_name, subvar_schema in self.subvars.items():
@@ -258,10 +263,13 @@ class DNACalculator:
         for fname in os.listdir(folder):
             if fname.lower().endswith('.json'):
                 path = os.path.join(folder, fname)
-                rule = Rule(path)
-                if rule.prefix in self.rules:
-                    raise RuleParseError(f"Duplicate prefix '{rule.prefix}' in {fname}")
-                self.rules[rule.prefix] = rule
+                try:
+                    rule = Rule(path)
+                    if rule.prefix in self.rules:
+                        raise RuleSchemaError(f"Duplicate prefix '{rule.prefix}' in {fname}")
+                    self.rules[rule.prefix] = rule
+                except (json.JSONDecodeError, KeyError) as e:
+                    raise RuleSchemaError(f"Failed to load rule from {fname}") from e
 
     def parse(self, dna_string):
         """

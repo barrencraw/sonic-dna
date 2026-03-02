@@ -32,6 +32,8 @@ import sys
 import time
 import threading
 import argparse
+import uuid
+import hashlib
 
 # ─── Import the batch parser and the GUI window ───────────────────────────────
 from utils.dna_ui import main as run_batch
@@ -89,8 +91,18 @@ def watch_loop():
                 timestamp = time.strftime('%Y-%m-%d %H:%M:%S')
                 print(f"[{timestamp}] New DNA detected → running parser…")
 
+                # Generate observability context
+                correlation_id = str(uuid.uuid4())
+                causal_event_id = hashlib.sha256(current_content.encode('utf-8')).hexdigest()
+                context = {
+                    "correlation_id": correlation_id,
+                    "causal_event_id": causal_event_id,
+                    "trigger": "watcher",
+                    "session_id": "background-watcher"
+                }
+
                 try:
-                    run_batch()
+                    run_batch(context=context)
                     # Only clear the input file if run_batch() succeeds
                     clear_input_file(input_file)
                     print(f"[{timestamp}] Parsing complete. Cleared toSequence.txt.\n")
@@ -136,9 +148,19 @@ def process_once():
         print(f"[ERROR] Input file not found: {input_file}")
         return
 
+    current_content = read_raw_contents(input_file)
+    correlation_id = str(uuid.uuid4())
+    causal_event_id = hashlib.sha256(current_content.encode('utf-8')).hexdigest()
+    context = {
+        "correlation_id": correlation_id,
+        "causal_event_id": causal_event_id,
+        "trigger": "manual_once",
+        "session_id": f"cli-{os.getlogin()}" if hasattr(os, 'getlogin') else "cli-unknown"
+    }
+
     print("[Once‐Runner] Processing all DNA strings once…")
     try:
-        run_batch()
+        run_batch(context=context)
         print("[Once‐Runner] Done.")
     except Exception as e:
         from utils.dna_ui import DNAProcessingError
