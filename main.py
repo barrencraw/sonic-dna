@@ -90,12 +90,17 @@ def watch_loop():
 
                 try:
                     run_batch()
+                    # Only clear the input file if run_batch() succeeds
+                    clear_input_file(input_file)
+                    print(f"[{timestamp}] Parsing complete. Cleared toSequence.txt.\n")
                 except Exception as e:
-                    print(f"[Watcher][ERROR] During parsing: {e}")
-
-                # Clear the input file so it won’t be parsed again
-                clear_input_file(input_file)
-                print(f"[{timestamp}] Parsing complete. Cleared toSequence.txt.\n")
+                    # Classify errors
+                    from utils.dna_ui import DNAProcessingError
+                    if isinstance(e, DNAProcessingError):
+                        print(f"[{timestamp}][Watcher][CRITICAL] DNA processing failed: {e}")
+                    else:
+                        print(f"[{timestamp}][Watcher][ERROR] Unexpected error: {e}")
+                    # In case of error, we DO NOT clear the input file so we can retry or investigate
 
                 # Reset last_content so we’ll catch the next chunk of DNA
                 last_content = ""
@@ -135,7 +140,12 @@ def process_once():
         run_batch()
         print("[Once‐Runner] Done.")
     except Exception as e:
-        print(f"[Once‐Runner][ERROR] During parsing: {e}")
+        from utils.dna_ui import DNAProcessingError
+        if isinstance(e, DNAProcessingError):
+            print(f"[Once‐Runner][CRITICAL] DNA processing failed: {e}")
+        else:
+            print(f"[Once‐Runner][ERROR] Unexpected error: {e}")
+        sys.exit(1)
 
 # ─── MAIN ENTRYPOINT ───────────────────────────────────────────────────────────
 
