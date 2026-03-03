@@ -6,6 +6,19 @@ import re
 class RuleParseError(Exception):
     pass
 
+class DNAResult:
+    def __init__(self, dna_string: str, rule: str, values: dict):
+        self.dna_string = dna_string
+        self.rule = rule
+        self.values = values
+
+    def to_dict(self):
+        return {
+            'dna': self.dna_string,
+            'rule': self.rule,
+            'parsed': self.values
+        }
+
 class Rule:
     def __init__(self, filepath):
         with open(filepath, 'r', encoding='utf-8') as f:
@@ -53,7 +66,7 @@ class Rule:
             dna.append(dna_part)
         return ''.join(dna)
 
-    def _parse_subvar(self, schema, dna, idx):
+    def _parse_subvar(self, schema, dna_string, idx):
         """
         Recursively parse one subvar. Returns (parsed_value, new_idx).
         parsed_value is either a leaf (int, str, or dict for composite) or nested dict.
@@ -64,17 +77,17 @@ class Rule:
             or 'band_class' in schema or 'index_min' in schema
         ):
             # Leaf case
-            return self._parse_leaf(schema, dna, idx)
+            return self._parse_leaf(schema, dna_string, idx)
         else:
             # Group (nested subfields)
             result = {}
             for child_name, child_schema in schema.items():
                 # Each child is itself a schema (leaf or group)
-                val, idx = self._parse_subvar(child_schema, dna, idx)
+                val, idx = self._parse_subvar(child_schema, dna_string, idx)
                 result[child_name] = val
             return result, idx
 
-    def _parse_leaf(self, schema, dna, idx):
+    def _parse_leaf(self, schema, dna_string, idx):
         """
         Figure out which pattern this leaf uses and parse accordingly.
         Returns (value, new_idx).
@@ -87,7 +100,7 @@ class Rule:
         if 'band_class' in schema and 'hz_pad' in schema:
             # First char = class letter; next hz_pad digits = integer
             length = 1 + schema['hz_pad']
-            fragment = dna[idx:idx+length]
+            fragment = dna_string[idx:idx+length]
             if len(fragment) < length:
                 raise RuleParseError(f"Unexpected end of string parsing composite at idx {idx}")
             cls = fragment[0]
@@ -101,7 +114,7 @@ class Rule:
             ip = schema['index_pad']
             lp = schema['links_pad']
             total_len = ip + 1 + lp
-            fragment = dna[idx:idx+total_len]
+            fragment = dna_string[idx:idx+total_len]
             if len(fragment) < total_len:
                 raise RuleParseError(f"Unexpected end parsing FM composite at idx {idx}")
             num_index = fragment[0:ip]
@@ -120,7 +133,7 @@ class Rule:
             # Sign = 1 character, numeric = pad digits
             pad = schema['pad']
             length = 1 + pad
-            fragment = dna[idx:idx+length]
+            fragment = dna_string[idx:idx+length]
             if len(fragment) < length:
                 raise RuleParseError(f"Unexpected end parsing signed numeric at idx {idx}")
             sign_char = fragment[0]
@@ -134,7 +147,7 @@ class Rule:
         if 'min' in schema and 'max' in schema and 'pad' in schema and 'description' in schema and 'hz_' not in schema:
             # If a leaf with numeric-only (no sign, no class): pad digits
             pad = schema['pad']
-            fragment = dna[idx:idx+pad]
+            fragment = dna_string[idx:idx+pad]
             if len(fragment) < pad or not fragment.isdigit():
                 raise RuleParseError(f"Unexpected numeric parse at idx {idx}: got '{fragment}'")
             return int(fragment), idx + pad
@@ -149,7 +162,7 @@ class Rule:
                 codes = class_order.split('-')
             first_code = codes[0]
             length = len(first_code)
-            fragment = dna[idx:idx+length]
+            fragment = dna_string[idx:idx+length]
             if len(fragment) < length:
                 raise RuleParseError(f"Unexpected end parsing class at idx {idx}")
             return fragment, idx + length
@@ -157,7 +170,7 @@ class Rule:
         # Catch-all: numeric-only with min,max,pad
         if 'min' in schema and 'max' in schema and 'pad' in schema:
             pad = schema['pad']
-            fragment = dna[idx:idx+pad]
+            fragment = dna_string[idx:idx+pad]
             if len(fragment) < pad or not fragment.isdigit():
                 raise RuleParseError(f"Numeric field parse error at idx {idx}: got '{fragment}'")
             return int(fragment), idx + pad
@@ -263,16 +276,20 @@ class DNACalculator:
                     raise RuleParseError(f"Duplicate prefix '{rule.prefix}' in {fname}")
                 self.rules[rule.prefix] = rule
 
-    def parse(self, dna_string):
+    def parse(self, dna_string: str) -> DNAResult:
         """
         Identify which rule applies (by prefix), then parse.
-        Returns { 'rule': variable_name, 'values': nested_dict }.
+        Returns a DNAResult instance.
         """
         # Try to match any known prefix
         for prefix, rule in self.rules.items():
             if dna_string.startswith(prefix):
-                parsed = rule.parse(dna_string)
-                return {'rule': rule.variable, 'values': parsed}
+                parsed_values = rule.parse(dna_string)
+                return DNAResult(
+                    dna_string=dna_string,
+                    rule=rule.variable,
+                    values=parsed_values
+                )
         raise RuleParseError(f"No matching rule for DNA '{dna_string}'")
 
     def serialize(self, variable_name, values_dict):
