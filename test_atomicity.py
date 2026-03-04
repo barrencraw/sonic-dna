@@ -56,7 +56,7 @@ class TestAtomicity(unittest.TestCase):
 
     def test_successful_parsing(self):
         """Verify that parsing works correctly under normal conditions."""
-        run_batch()
+        run_batch(correlation_id="test-id")
 
         json_out = os.path.join(self.output_dir, 'toSequence_parsed.json')
         csv_out = os.path.join(self.output_dir, 'toSequence_parsed.csv')
@@ -70,10 +70,14 @@ class TestAtomicity(unittest.TestCase):
             self.assertEqual(data[0]['dna'], 'V100')
 
     def test_crash_during_json_write(self):
-        """Simulate a crash during JSON writing. No output files should be created."""
+        """Simulate a crash during JSON writing. No output files should be created/updated."""
+        # Use a DNA string that hasn't been processed yet to trigger the write
+        with open(self.input_file, 'w') as f:
+            f.write("V200\n")
+
         with patch('json.dump', side_effect=IOError("Disk Full")):
             with self.assertRaises(PersistenceError):
-                run_batch()
+                run_batch(correlation_id="test-id")
 
         json_out = os.path.join(self.output_dir, 'toSequence_parsed.json')
         csv_out = os.path.join(self.output_dir, 'toSequence_parsed.csv')
@@ -83,9 +87,12 @@ class TestAtomicity(unittest.TestCase):
 
     def test_crash_during_rename(self):
         """Simulate a crash/failure during the atomic rename. No output files should be created/updated."""
+        with open(self.input_file, 'w') as f:
+            f.write("V300\n")
+
         with patch('os.replace', side_effect=OSError("Permission Denied")):
             with self.assertRaises(PersistenceError):
-                run_batch()
+                run_batch(correlation_id="test-id")
 
         json_out = os.path.join(self.output_dir, 'toSequence_parsed.json')
         csv_out = os.path.join(self.output_dir, 'toSequence_parsed.csv')
@@ -100,13 +107,16 @@ class TestAtomicity(unittest.TestCase):
             del sys.modules['main']
         import main
 
-        # We'll mock run_batch to fail
-        with patch('main.run_batch', side_effect=PersistenceError("Failed")):
-            with patch('main.clear_input_file') as mock_clear:
-                with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
-                    main.process_once()
+        # We need to mock os.chdir and dirname to keep it in our test_dir
+        with patch('os.chdir'):
+            with patch('os.path.dirname', return_value=self.test_dir):
+                # We'll mock run_batch to fail
+                with patch('main.run_batch', side_effect=PersistenceError("Failed")):
+                    with patch('main.clear_input_file') as mock_clear:
+                        with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
+                            main.process_once()
 
-                mock_clear.assert_not_called()
+                        mock_clear.assert_not_called()
 
         # Verify file still has content
         with open(self.input_file, 'r') as f:
