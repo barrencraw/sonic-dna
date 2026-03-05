@@ -2,6 +2,7 @@
 import os
 import json
 import re
+from utils.dtos import DNAResult
 
 class RuleParseError(Exception):
     pass
@@ -263,16 +264,16 @@ class DNACalculator:
                     raise RuleParseError(f"Duplicate prefix '{rule.prefix}' in {fname}")
                 self.rules[rule.prefix] = rule
 
-    def parse(self, dna_string):
+    def parse(self, dna_string) -> DNAResult:
         """
         Identify which rule applies (by prefix), then parse.
-        Returns { 'rule': variable_name, 'values': nested_dict }.
+        Returns a DNAResult DTO.
         """
         # Try to match any known prefix
         for prefix, rule in self.rules.items():
             if dna_string.startswith(prefix):
                 parsed = rule.parse(dna_string)
-                return {'rule': rule.variable, 'values': parsed}
+                return DNAResult(dna=dna_string, rule=rule.variable, values=parsed)
         raise RuleParseError(f"No matching rule for DNA '{dna_string}'")
 
     def serialize(self, variable_name, values_dict):
