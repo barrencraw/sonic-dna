@@ -10,6 +10,10 @@ sys.modules["PySide6.QtGui"] = mock_pyside6
 sys.modules["torch"] = MagicMock()
 sys.modules["torchaudio"] = MagicMock()
 sys.modules["sounddevice"] = MagicMock()
+sys.modules["numpy"] = MagicMock()
+sys.modules["scipy"] = MagicMock()
+sys.modules["scipy.io"] = MagicMock()
+sys.modules["scipy.io.wavfile"] = MagicMock()
 
 import unittest
 import os
@@ -98,15 +102,25 @@ class TestAtomicity(unittest.TestCase):
         # Force import after mocks
         if 'main' in sys.modules:
             del sys.modules['main']
+
+        # Mock providers and MainWindow to avoid dependency issues during import
+        sys.modules["utils.providers"] = MagicMock()
+        sys.modules["ui.main_window"] = MagicMock()
+
         import main
+
+        # Set up correct input path in main for the test environment
+        main.input_file = self.input_file
 
         # We'll mock run_batch to fail
         with patch('main.run_batch', side_effect=PersistenceError("Failed")):
             with patch('main.clear_input_file') as mock_clear:
-                with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
-                    main.process_once()
+                # We need to mock os.path.isfile to return True for our test input file
+                with patch('os.path.isfile', return_value=True):
+                    with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
+                        main.process_once()
 
-                mock_clear.assert_not_called()
+                    mock_clear.assert_not_called()
 
         # Verify file still has content
         with open(self.input_file, 'r') as f:
