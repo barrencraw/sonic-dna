@@ -32,9 +32,10 @@ import sys
 import time
 import threading
 import argparse
+import uuid
 
 # ─── Import the batch parser and the GUI window ───────────────────────────────
-from utils.dna_ui import main as run_batch
+from utils import dna_ui
 from utils.providers import RngProvider
 from PySide6.QtWidgets import QApplication
 from ui.main_window import MainWindow
@@ -86,22 +87,22 @@ def watch_loop():
 
             # If there’s new non‐empty content that differs from last run, process it:
             if current_content.strip() and current_content != last_content:
+                correlation_id = str(uuid.uuid4())
                 timestamp = time.strftime('%Y-%m-%d %H:%M:%S')
-                print(f"[{timestamp}] New DNA detected → running parser…")
+                print(f"[{timestamp}] New DNA detected (cid={correlation_id}) → running parser…")
 
                 try:
-                    run_batch()
+                    dna_ui.main(correlation_id=correlation_id)
                     # Only clear the input file if run_batch() succeeds
                     clear_input_file(input_file)
                     print(f"[{timestamp}] Parsing complete. Cleared toSequence.txt.\n")
                 except Exception as e:
-                    # Classify errors
+                    # In case of error, we DO NOT clear the input file so we can retry or investigate
                     from utils.dna_ui import DNAProcessingError
                     if isinstance(e, DNAProcessingError):
                         print(f"[{timestamp}][Watcher][CRITICAL] DNA processing failed: {e}")
                     else:
                         print(f"[{timestamp}][Watcher][ERROR] Unexpected error: {e}")
-                    # In case of error, we DO NOT clear the input file so we can retry or investigate
 
                 # Reset last_content so we’ll catch the next chunk of DNA
                 last_content = ""
@@ -136,11 +137,13 @@ def process_once():
         print(f"[ERROR] Input file not found: {input_file}")
         return
 
-    print("[Once‐Runner] Processing all DNA strings once…")
+    correlation_id = str(uuid.uuid4())
+    print(f"[Once‐Runner] Processing all DNA strings once (cid={correlation_id})…")
     try:
-        run_batch()
+        dna_ui.main(correlation_id=correlation_id)
         print("[Once‐Runner] Done.")
     except Exception as e:
+        # If any error occurs, exit with non-zero code
         from utils.dna_ui import DNAProcessingError
         if isinstance(e, DNAProcessingError):
             print(f"[Once‐Runner][CRITICAL] DNA processing failed: {e}")
