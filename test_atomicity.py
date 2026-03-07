@@ -100,16 +100,24 @@ class TestAtomicity(unittest.TestCase):
             del sys.modules['main']
         import main
 
-        # We'll mock run_batch to fail
-        with patch('main.run_batch', side_effect=PersistenceError("Failed")):
-            with patch('main.clear_input_file') as mock_clear:
-                with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
+        # Create input file in the location main.py expects (relative to its os.chdir)
+        os.makedirs('data/raw', exist_ok=True)
+        with open('data/raw/toSequence.txt', 'w') as f:
+            f.write("V100\n")
+
+        # We'll mock dna_ui.main to fail. We raise Exception to avoid class mismatch issues in the catch.
+        mock_run = MagicMock(side_effect=Exception("Failed"))
+        with patch('main.dna_ui.main', mock_run):
+            with patch('main.os.chdir'): # Prevent chdir away from temp dir
+              with patch('main.os.path.abspath', return_value=self.test_dir): # Force script_dir to be test_dir
+                with patch('main.clear_input_file') as mock_clear:
+                  with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
                     main.process_once()
 
                 mock_clear.assert_not_called()
 
         # Verify file still has content
-        with open(self.input_file, 'r') as f:
+        with open('data/raw/toSequence.txt', 'r') as f:
             self.assertEqual(f.read().strip(), "V100")
 
 if __name__ == '__main__':

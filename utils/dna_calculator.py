@@ -21,35 +21,35 @@ class Rule:
         for subvar_name, subvar_schema in self.subvars.items():
             self.plan.append((subvar_name, subvar_schema))
 
-    def parse(self, dna_string):
+    def parse(self, raw_dna):
         """
         Given a DNA string (complete, including prefix), return a nested dict:
         { subvar_name: value or {child: ...}, ... }.
         """
-        if not dna_string.startswith(self.prefix):
-            raise RuleParseError(f"DNA '{dna_string}' does not start with prefix '{self.prefix}'")
+        if not raw_dna.startswith(self.prefix):
+            raise RuleParseError(f"DNA '{raw_dna}' does not start with prefix '{self.prefix}'")
         idx = len(self.prefix)
-        values = {}
+        processing_result = {}
         for subvar_name, subvar_schema in self.plan:
-            val, idx = self._parse_subvar(subvar_schema, dna_string, idx)
-            values[subvar_name] = val
-        # If idx != len(dna_string), leftover characters
-        if idx != len(dna_string):
+            val, idx = self._parse_subvar(subvar_schema, raw_dna, idx)
+            processing_result[subvar_name] = val
+        # If idx != len(raw_dna), leftover characters
+        if idx != len(raw_dna):
             raise RuleParseError(
                 f"Extra characters after parsing rule '{self.variable}': "
-                f"parsed up to index {idx}, string length {len(dna_string)}"
+                f"parsed up to index {idx}, string length {len(raw_dna)}"
             )
-        return values
+        return processing_result
 
-    def serialize(self, values_dict):
+    def serialize(self, processing_result):
         """
         Given a nested dict of values matching this rule’s subvars, rebuild the DNA string.
         """
         dna = [self.prefix]
         for subvar_name, subvar_schema in self.plan:
-            if subvar_name not in values_dict:
+            if subvar_name not in processing_result:
                 raise RuleParseError(f"Missing subvar '{subvar_name}' for rule '{self.variable}'")
-            dna_part = self._serialize_subvar(subvar_schema, values_dict[subvar_name])
+            dna_part = self._serialize_subvar(subvar_schema, processing_result[subvar_name])
             dna.append(dna_part)
         return ''.join(dna)
 
@@ -263,24 +263,24 @@ class DNACalculator:
                     raise RuleParseError(f"Duplicate prefix '{rule.prefix}' in {fname}")
                 self.rules[rule.prefix] = rule
 
-    def parse(self, dna_string):
+    def parse(self, raw_dna):
         """
         Identify which rule applies (by prefix), then parse.
         Returns { 'rule': variable_name, 'values': nested_dict }.
         """
         # Try to match any known prefix
         for prefix, rule in self.rules.items():
-            if dna_string.startswith(prefix):
-                parsed = rule.parse(dna_string)
+            if raw_dna.startswith(prefix):
+                parsed = rule.parse(raw_dna)
                 return {'rule': rule.variable, 'values': parsed}
-        raise RuleParseError(f"No matching rule for DNA '{dna_string}'")
+        raise RuleParseError(f"No matching rule for DNA '{raw_dna}'")
 
-    def serialize(self, variable_name, values_dict):
+    def serialize(self, variable_name, processing_result):
         """
         Given a variable name (the human-readable name, e.g. "Volume"),
         find the rule and serialize values to DNA string.
         """
         for rule in self.rules.values():
             if rule.variable == variable_name:
-                return rule.serialize(values_dict)
+                return rule.serialize(processing_result)
         raise RuleParseError(f"No rule found for variable '{variable_name}'")
