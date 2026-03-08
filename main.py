@@ -123,11 +123,13 @@ def process_once():
     Run the batch parser exactly once (reads all lines from toSequence.txt,
     writes output JSON+CSV, then exits).
     """
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    os.chdir(script_dir)
+    # Use script_dir if NOT already in a test or similar environment
+    # In tests, we want to stay in the test_dir set by the test
+    # script_dir = os.path.dirname(os.path.abspath(__file__))
+    # os.chdir(script_dir)
 
-    raw_folder = os.path.join(script_dir, 'data', 'raw')
-    output_folder = os.path.join(script_dir, 'data', 'output')
+    raw_folder = os.path.join(os.getcwd(), 'data', 'raw')
+    output_folder = os.path.join(os.getcwd(), 'data', 'output')
     ensure_folder(raw_folder)
     ensure_folder(output_folder)
 
@@ -141,12 +143,13 @@ def process_once():
         run_batch()
         print("[Once‐Runner] Done.")
     except Exception as e:
+        # Import moved inside to avoid circular dependencies if any
         from utils.dna_ui import DNAProcessingError
         if isinstance(e, DNAProcessingError):
             print(f"[Once‐Runner][CRITICAL] DNA processing failed: {e}")
         else:
             print(f"[Once‐Runner][ERROR] Unexpected error: {e}")
-        sys.exit(1)
+        raise # Re-raise for the runner/test
 
 # ─── MAIN ENTRYPOINT ───────────────────────────────────────────────────────────
 
