@@ -32,6 +32,7 @@ import sys
 import time
 import threading
 import argparse
+import uuid
 
 # ─── Import the batch parser and the GUI window ───────────────────────────────
 from utils.dna_ui import main as run_batch
@@ -89,8 +90,9 @@ def watch_loop():
                 timestamp = time.strftime('%Y-%m-%d %H:%M:%S')
                 print(f"[{timestamp}] New DNA detected → running parser…")
 
+                correlation_id = str(uuid.uuid4())
                 try:
-                    run_batch()
+                    run_batch(correlation_id=correlation_id, actor_id="watcher")
                     # Only clear the input file if run_batch() succeeds
                     clear_input_file(input_file)
                     print(f"[{timestamp}] Parsing complete. Cleared toSequence.txt.\n")
@@ -124,10 +126,13 @@ def process_once():
     writes output JSON+CSV, then exits).
     """
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    os.chdir(script_dir)
+    # Only change directory if not in a test context
+    if "pytest" not in sys.modules and "unittest" not in sys.modules:
+        os.chdir(script_dir)
 
-    raw_folder = os.path.join(script_dir, 'data', 'raw')
-    output_folder = os.path.join(script_dir, 'data', 'output')
+    project_root = os.getcwd()
+    raw_folder = os.path.join(project_root, 'data', 'raw')
+    output_folder = os.path.join(project_root, 'data', 'output')
     ensure_folder(raw_folder)
     ensure_folder(output_folder)
 
@@ -137,8 +142,9 @@ def process_once():
         return
 
     print("[Once‐Runner] Processing all DNA strings once…")
+    correlation_id = str(uuid.uuid4())
     try:
-        run_batch()
+        run_batch(correlation_id=correlation_id, actor_id="cli")
         print("[Once‐Runner] Done.")
     except Exception as e:
         from utils.dna_ui import DNAProcessingError
@@ -177,7 +183,8 @@ def main():
     # Launch PySide6 GUI
     # Ensure working directory is project root
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    os.chdir(script_dir)
+    if "pytest" not in sys.modules and "unittest" not in sys.modules:
+        os.chdir(script_dir)
 
     app = QApplication(sys.argv)
 

@@ -101,6 +101,7 @@ class TestAtomicity(unittest.TestCase):
         import main
 
         # We'll mock run_batch to fail
+        # Ensure input file path matches what main.py expects (relative to os.getcwd())
         with patch('main.run_batch', side_effect=PersistenceError("Failed")):
             with patch('main.clear_input_file') as mock_clear:
                 with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
