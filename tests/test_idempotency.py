@@ -17,7 +17,7 @@ class TestIdempotency(unittest.TestCase):
         self.json_output = os.path.join(self.output_folder, 'toSequence_parsed.json')
 
         # Backup existing data if any
-        self.backup_folder = os.path.join(self.project_root, 'data_backup')
+        self.backup_folder = os.path.join(self.project_root, 'data_backup_idem')
         if os.path.exists(self.data_folder):
             shutil.copytree(self.data_folder, self.backup_folder, dirs_exist_ok=True)
 
@@ -36,9 +36,7 @@ class TestIdempotency(unittest.TestCase):
         if os.path.exists(self.data_folder):
             shutil.rmtree(self.data_folder)
         if os.path.exists(self.backup_folder):
-            # Check if backup exists before moving
-            if os.path.exists(self.backup_folder):
-                shutil.move(self.backup_folder, self.data_folder)
+            shutil.move(self.backup_folder, self.data_folder)
 
     def test_double_invocation_same_key(self):
         # DNA for Volume (prefix 'VOL')
@@ -58,7 +56,7 @@ class TestIdempotency(unittest.TestCase):
         with open(self.ledger_path, 'r') as f:
             ledger = json.load(f)
         self.assertIn(dna, ledger)
-        self.assertEqual(ledger[dna]['terminal_outcome'], 'success')
+        self.assertEqual(ledger[dna]['terminal_outcome'], 'SUCCESS')
 
         # 2. Second invocation with same DNA
         with open(self.input_file, 'w') as f:
