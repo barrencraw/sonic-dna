@@ -4,6 +4,7 @@ import json
 import csv
 import time
 from utils.dna_calculator import DNACalculator, RuleParseError
+from utils.integrity_manager import IntegrityManager
 
 def ensure_folder(path):
     if not os.path.isdir(path):
@@ -69,6 +70,8 @@ def main():
     raw_folder = os.path.join(project_root, 'data', 'raw')
     output_folder = os.path.join(project_root, 'data', 'output')
     ledger_path = os.path.join(project_root, 'data', 'processed_ledger.json')
+    integrity_path = os.path.join(project_root, 'data', 'system_integrity.json')
+    messages_path = os.path.join(project_root, 'data', 'system_messages.json')
     ensure_folder(output_folder)
 
     input_file = os.path.join(raw_folder, 'toSequence.txt')
@@ -93,6 +96,7 @@ def main():
         return
 
     ledger = load_ledger(ledger_path)
+    integrity_manager = IntegrityManager(integrity_path, messages_path)
 
     # 1) Load existing JSON output
     json_output_path = os.path.join(output_folder, 'toSequence_parsed.json')
@@ -133,20 +137,56 @@ def main():
 
         try:
             result = calculator.parse(dna_str)
-            entry = {
-                'dna': dna_str,
-                'rule': result['rule'],
-                'parsed': result['values']
-            }
-            parsed_json.append(entry)
 
-            # Flatten for CSV
-            flat = flatten_parsed(result['rule'], result['values'])
-            flat['dna'] = dna_str
-            flat['rule'] = result['rule']
-            csv_rows.append(flat)
-            all_flattened_keys.update(flat.keys())
-            outcome = "success"
+            # Check for refusal
+            if integrity_manager.is_refused(dna_str, result):
+                refusal_info = integrity_manager.get_refusal_info()
+                outcome = f"REFUSAL: {refusal_info['reason']} (Hint: {refusal_info['hint']})"
+                print(f"[Integrity] key={idempotency_key} refusal_hit=True outcome={outcome}")
+
+                # Append to output with refusal info
+                entry = {
+                    'dna': dna_str,
+                    'outcome': 'REFUSAL',
+                    'reason': refusal_info['reason'],
+                    'hint': refusal_info['hint']
+                }
+                parsed_json.append(entry)
+
+                flat = {
+                    'dna': dna_str,
+                    'outcome': 'REFUSAL',
+                    'reason': refusal_info['reason'],
+                    'hint': refusal_info['hint']
+                }
+                csv_rows.append(flat)
+                all_flattened_keys.update(flat.keys())
+            else:
+                # Process normally
+                entry = {
+                    'dna': dna_str,
+                    'rule': result['rule'],
+                    'parsed': result['values']
+                }
+
+                # Apply consequence
+                consequence_key = integrity_manager.apply_consequence(result)
+                if consequence_key:
+                    entry['consequence'] = integrity_manager.messages.get(consequence_key, "System integrity updated.")
+                    print(f"[Integrity] key={idempotency_key} consequence_applied={consequence_key} new_integrity={integrity_manager.integrity}")
+
+                parsed_json.append(entry)
+
+                # Flatten for CSV
+                flat = flatten_parsed(result['rule'], result['values'])
+                flat['dna'] = dna_str
+                flat['rule'] = result['rule']
+                if consequence_key:
+                    flat['consequence'] = entry['consequence']
+
+                csv_rows.append(flat)
+                all_flattened_keys.update(flat.keys())
+                outcome = "success"
 
         except RuleParseError as e:
             # On parse error, record as error entry
@@ -160,6 +200,14 @@ def main():
             all_flattened_keys.update(flat.keys())
             outcome = f"error: {str(e)}"
 
+        # Update ledger and count inside the loop
+        ledger[idempotency_key] = {
+            'terminal_outcome': outcome,
+            'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
+        }
+        print(f"[Idempotency] key={idempotency_key} dedupe_hit=False terminal_outcome={outcome}")
+        new_processed_count += 1
+
     # ATOMIC WRITE PATTERN:
     # 1. Write to a temporary directory in the same filesystem as the output folder
     # 2. Flush and sync files to ensure they are on disk
@@ -171,6 +219,7 @@ def main():
     with tempfile.TemporaryDirectory(dir=output_folder) as tmp_dir:
         tmp_json = os.path.join(tmp_dir, 'output.json')
         tmp_csv = os.path.join(tmp_dir, 'output.csv')
+        tmp_integrity = os.path.join(tmp_dir, 'integrity.json')
 
         try:
             # 1) Write JSON output to temp
@@ -190,39 +239,25 @@ def main():
                 cf.flush()
                 os.fsync(cf.fileno())
 
-            # 3) Atomic rename (commit)
-            # On Unix, os.replace is atomic. On Windows, it replaces if it exists.
+            # 3) Write Integrity to temp
+            with open(tmp_integrity, 'w', encoding='utf-8') as iff:
+                json.dump({'integrity': integrity_manager.integrity}, iff)
+                iff.flush()
+                os.fsync(iff.fileno())
+
+            # 4) Atomic rename (commit)
             os.replace(tmp_json, json_output_path)
             os.replace(tmp_csv, csv_output_path)
+            os.replace(tmp_integrity, integrity_path)
 
         except Exception as e:
             raise PersistenceError("Failed to write output files atomically") from e
 
     print(f"[OK] Parsed {len(dna_list)} DNA strings.")
-        ledger[idempotency_key] = {
-            'terminal_outcome': outcome,
-            'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
-        }
-        print(f"[Idempotency] key={idempotency_key} dedupe_hit=False terminal_outcome={outcome}")
-        new_processed_count += 1
 
     if new_processed_count > 0:
         # Save ledger
         save_ledger(ledger_path, ledger)
-
-        # Write JSON output
-        with open(json_output_path, 'w', encoding='utf-8') as jf:
-            json.dump(parsed_json, jf, indent=2)
-
-        # Write CSV output
-        fieldnames = sorted(all_flattened_keys)
-        with open(csv_output_path, 'w', newline='', encoding='utf-8') as cf:
-            writer = csv.DictWriter(cf, fieldnames=fieldnames)
-            writer.writeheader()
-            for row in csv_rows:
-                # Ensure every field in fieldnames
-                out = {k: row.get(k, '') for k in fieldnames}
-                writer.writerow(out)
 
     print(f"[OK] Processed {new_processed_count} new DNA strings. Total in ledger: {len(ledger)}")
     print(f"     JSON → {json_output_path}")
