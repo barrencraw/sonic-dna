@@ -18,8 +18,8 @@ The **DNA Batch Parser** was selected because it is the core data processing pat
 ### Implementation Details:
 - **Best Available Primitive:** Processed message ledger (`data/processed_ledger.json`).
 - **Idempotency Key:** The DNA string itself (unique representation of the sound property).
-- **Observability:** Logs `idempotency_key`, `dedupe_hit`, and `terminal_outcome`.
-- **Side Effects:** Results are appended to cumulative JSON/CSV stores only if the key is new in the ledger.
+- **Observability:** Logs `key`, `outcome`, and sometimes `reason`/`hint`.
+- **Side Effects:** Results are appended to cumulative JSON/CSV stores only if the key is new in the ledger. System integrity state is updated atomically with the ledger.
 
 ### Verification (Proof):
 Run the adversarial double-invocation test:
