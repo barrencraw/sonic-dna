@@ -32,6 +32,7 @@ import sys
 import time
 import threading
 import argparse
+import uuid
 
 # ─── Import the batch parser and the GUI window ───────────────────────────────
 from utils.dna_ui import main as run_batch
@@ -89,8 +90,12 @@ def watch_loop():
                 timestamp = time.strftime('%Y-%m-%d %H:%M:%S')
                 print(f"[{timestamp}] New DNA detected → running parser…")
 
+                # Generate observability context
+                correlation_id = str(uuid.uuid4())
+                actor_id = "system"
+
                 try:
-                    run_batch()
+                    run_batch(correlation_id=correlation_id, actor_id=actor_id)
                     # Only clear the input file if run_batch() succeeds
                     clear_input_file(input_file)
                     print(f"[{timestamp}] Parsing complete. Cleared toSequence.txt.\n")
@@ -137,8 +142,13 @@ def process_once():
         return
 
     print("[Once‐Runner] Processing all DNA strings once…")
+
+    # Generate observability context
+    correlation_id = str(uuid.uuid4())
+    actor_id = "user_batch"
+
     try:
-        run_batch()
+        run_batch(correlation_id=correlation_id, actor_id=actor_id)
         print("[Once‐Runner] Done.")
     except Exception as e:
         from utils.dna_ui import DNAProcessingError
