@@ -10,6 +10,10 @@ sys.modules["PySide6.QtGui"] = mock_pyside6
 sys.modules["torch"] = MagicMock()
 sys.modules["torchaudio"] = MagicMock()
 sys.modules["sounddevice"] = MagicMock()
+sys.modules["numpy"] = MagicMock()
+sys.modules["scipy"] = MagicMock()
+sys.modules["scipy.io"] = MagicMock()
+sys.modules["scipy.io.wavfile"] = MagicMock()
 
 import unittest
 import os
@@ -101,12 +105,32 @@ class TestAtomicity(unittest.TestCase):
         import main
 
         # We'll mock run_batch to fail
+        # and we need to mock os.chdir and os.path.dirname to stay in our test context
         with patch('main.run_batch', side_effect=PersistenceError("Failed")):
             with patch('main.clear_input_file') as mock_clear:
-                with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
-                    main.process_once()
+                with patch('os.chdir'):
+                    with patch('os.path.dirname', return_value=self.test_dir):
+                        with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
+                            main.process_once()
 
                 mock_clear.assert_not_called()
+
+    def test_watcher_no_clear_on_failure(self):
+        """Test watcher loop: if run_batch fails, input file should NOT be cleared."""
+        if 'main' in sys.modules:
+            del sys.modules['main']
+        import main
+
+        # Mock dependencies for watch_loop
+        with patch('main.read_raw_contents', side_effect=["V100", ""]):
+            with patch('main.run_batch', side_effect=PersistenceError("Failed")):
+                with patch('main.clear_input_file') as mock_clear:
+                    with patch('os.chdir'):
+                        with patch('os.path.dirname', return_value=self.test_dir):
+                            with patch('time.sleep', side_effect=KeyboardInterrupt):
+                                main.watch_loop()
+
+                    mock_clear.assert_not_called()
 
         # Verify file still has content
         with open(self.input_file, 'r') as f:
