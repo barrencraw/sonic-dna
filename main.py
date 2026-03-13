@@ -32,6 +32,7 @@ import sys
 import time
 import threading
 import argparse
+import uuid
 
 # ─── Import the batch parser and the GUI window ───────────────────────────────
 from utils.dna_ui import main as run_batch
@@ -69,7 +70,10 @@ def watch_loop():
     run the batch parser and then clear toSequence.txt. Sleeps 1 second between checks.
     """
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    os.chdir(script_dir)
+    # In test mode, we might want to stay in current dir, but main.py traditionally chdirs.
+    # To handle tests properly, we'll chdir only if not in a test runner.
+    if "pytest" not in sys.modules and "unittest" not in sys.modules:
+        os.chdir(script_dir)
 
     raw_folder = os.path.join(script_dir, 'data', 'raw')
     output_folder = os.path.join(script_dir, 'data', 'output')
@@ -89,8 +93,9 @@ def watch_loop():
                 timestamp = time.strftime('%Y-%m-%d %H:%M:%S')
                 print(f"[{timestamp}] New DNA detected → running parser…")
 
+                cid = str(uuid.uuid4())
                 try:
-                    run_batch()
+                    run_batch(correlation_id=cid, actor_id="system")
                     # Only clear the input file if run_batch() succeeds
                     clear_input_file(input_file)
                     print(f"[{timestamp}] Parsing complete. Cleared toSequence.txt.\n")
@@ -124,7 +129,8 @@ def process_once():
     writes output JSON+CSV, then exits).
     """
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    os.chdir(script_dir)
+    if "pytest" not in sys.modules and "unittest" not in sys.modules:
+        os.chdir(script_dir)
 
     raw_folder = os.path.join(script_dir, 'data', 'raw')
     output_folder = os.path.join(script_dir, 'data', 'output')
@@ -137,8 +143,13 @@ def process_once():
         return
 
     print("[Once‐Runner] Processing all DNA strings once…")
+    cid = str(uuid.uuid4())
     try:
-        run_batch()
+        run_batch(correlation_id=cid, actor_id="user_batch")
+        # For once-runner, we also want to clear the input file if successful,
+        # otherwise subsequent runs will re-process (though ledger handles it,
+        # we want to drain the queue).
+        clear_input_file(input_file)
         print("[Once‐Runner] Done.")
     except Exception as e:
         from utils.dna_ui import DNAProcessingError
