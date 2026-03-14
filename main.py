@@ -30,6 +30,7 @@ Directory layout (relative to where this main.py lives):
 import os
 import sys
 import time
+import uuid
 import threading
 import argparse
 
@@ -61,6 +62,10 @@ def read_raw_contents(path: str) -> str:
     with open(path, 'r', encoding='utf-8') as f:
         return f.read()
 
+def is_test_env():
+    """Detect if we are running in a test environment."""
+    return 'pytest' in sys.modules or 'unittest' in sys.modules
+
 # ─── WATCHER LOOP ──────────────────────────────────────────────────────────────
 
 def watch_loop():
@@ -68,8 +73,9 @@ def watch_loop():
     Continuously watch data/raw/toSequence.txt. Whenever new non‐empty content appears,
     run the batch parser and then clear toSequence.txt. Sleeps 1 second between checks.
     """
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    os.chdir(script_dir)
+    script_dir = os.getcwd() if is_test_env() else os.path.dirname(os.path.abspath(__file__))
+    if not is_test_env():
+        os.chdir(script_dir)
 
     raw_folder = os.path.join(script_dir, 'data', 'raw')
     output_folder = os.path.join(script_dir, 'data', 'output')
@@ -90,7 +96,8 @@ def watch_loop():
                 print(f"[{timestamp}] New DNA detected → running parser…")
 
                 try:
-                    run_batch()
+                    correlation_id = str(uuid.uuid4())
+                    run_batch(correlation_id=correlation_id, actor_id='system')
                     # Only clear the input file if run_batch() succeeds
                     clear_input_file(input_file)
                     print(f"[{timestamp}] Parsing complete. Cleared toSequence.txt.\n")
@@ -123,8 +130,9 @@ def process_once():
     Run the batch parser exactly once (reads all lines from toSequence.txt,
     writes output JSON+CSV, then exits).
     """
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    os.chdir(script_dir)
+    script_dir = os.getcwd() if is_test_env() else os.path.dirname(os.path.abspath(__file__))
+    if not is_test_env():
+        os.chdir(script_dir)
 
     raw_folder = os.path.join(script_dir, 'data', 'raw')
     output_folder = os.path.join(script_dir, 'data', 'output')
@@ -138,7 +146,8 @@ def process_once():
 
     print("[Once‐Runner] Processing all DNA strings once…")
     try:
-        run_batch()
+        correlation_id = str(uuid.uuid4())
+        run_batch(correlation_id=correlation_id, actor_id='user_batch')
         print("[Once‐Runner] Done.")
     except Exception as e:
         from utils.dna_ui import DNAProcessingError
@@ -176,8 +185,9 @@ def main():
 
     # Launch PySide6 GUI
     # Ensure working directory is project root
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    os.chdir(script_dir)
+    script_dir = os.getcwd() if is_test_env() else os.path.dirname(os.path.abspath(__file__))
+    if not is_test_env():
+        os.chdir(script_dir)
 
     app = QApplication(sys.argv)
 
