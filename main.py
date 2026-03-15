@@ -32,6 +32,7 @@ import sys
 import time
 import threading
 import argparse
+import uuid
 
 # ─── Import the batch parser and the GUI window ───────────────────────────────
 from utils.dna_ui import main as run_batch
@@ -68,8 +69,11 @@ def watch_loop():
     Continuously watch data/raw/toSequence.txt. Whenever new non‐empty content appears,
     run the batch parser and then clear toSequence.txt. Sleeps 1 second between checks.
     """
+    # Detection for test environments to skip os.chdir
+    in_test = any(m in sys.modules for m in ["pytest", "unittest"])
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    os.chdir(script_dir)
+    if not in_test:
+        os.chdir(script_dir)
 
     raw_folder = os.path.join(script_dir, 'data', 'raw')
     output_folder = os.path.join(script_dir, 'data', 'output')
@@ -90,7 +94,8 @@ def watch_loop():
                 print(f"[{timestamp}] New DNA detected → running parser…")
 
                 try:
-                    run_batch()
+                    correlation_id = str(uuid.uuid4())
+                    run_batch(correlation_id=correlation_id, actor_id="system_watcher")
                     # Only clear the input file if run_batch() succeeds
                     clear_input_file(input_file)
                     print(f"[{timestamp}] Parsing complete. Cleared toSequence.txt.\n")
@@ -123,8 +128,11 @@ def process_once():
     Run the batch parser exactly once (reads all lines from toSequence.txt,
     writes output JSON+CSV, then exits).
     """
+    # Detection for test environments to skip os.chdir
+    in_test = any(m in sys.modules for m in ["pytest", "unittest"])
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    os.chdir(script_dir)
+    if not in_test:
+        os.chdir(script_dir)
 
     raw_folder = os.path.join(script_dir, 'data', 'raw')
     output_folder = os.path.join(script_dir, 'data', 'output')
@@ -138,7 +146,8 @@ def process_once():
 
     print("[Once‐Runner] Processing all DNA strings once…")
     try:
-        run_batch()
+        correlation_id = str(uuid.uuid4())
+        run_batch(correlation_id=correlation_id, actor_id="user_batch")
         print("[Once‐Runner] Done.")
     except Exception as e:
         from utils.dna_ui import DNAProcessingError
