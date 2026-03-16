@@ -1,0 +1,6 @@
+[Once‐Runner] Processing all DNA strings once (correlation_id=32923957-e220-4bdc-9434-03c16444da2f)…
+[OBSERVABILITY] {"correlation_id": "32923957-e220-4bdc-9434-03c16444da2f", "actor_id": "once_runner", "chain": "dna_batch_chain", "step": "start_batch", "outcome": "SUCCESS", "timestamp": "2026-03-16T13:25:47.139411+00:00"}
+[OBSERVABILITY] {"correlation_id": "32923957-e220-4bdc-9434-03c16444da2f", "actor_id": "once_runner", "chain": "dna_batch_chain", "step": "process_dna", "outcome": "SUCCESS", "timestamp": "2026-03-16T13:25:47.140965+00:00", "latency_ms": 0.0553131103515625, "idempotency_key": "VOL08900750712"}
+[OBSERVABILITY] {"correlation_id": "32923957-e220-4bdc-9434-03c16444da2f", "actor_id": "once_runner", "chain": "dna_batch_chain", "step": "commit_batch", "outcome": "SUCCESS", "timestamp": "2026-03-16T13:25:47.145326+00:00", "latency_ms": 4.31370735168457}
+[OBSERVABILITY] {"correlation_id": "32923957-e220-4bdc-9434-03c16444da2f", "actor_id": "once_runner", "chain": "dna_batch_chain", "step": "terminal", "outcome": "SUCCESS", "timestamp": "2026-03-16T13:25:47.145625+00:00", "latency_ms": 6.216764450073242}
+[Once‐Runner] Done.
