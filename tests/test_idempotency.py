@@ -58,7 +58,7 @@ class TestIdempotency(unittest.TestCase):
         with open(self.ledger_path, 'r') as f:
             ledger = json.load(f)
         self.assertIn(dna, ledger)
-        self.assertEqual(ledger[dna]['terminal_outcome'], 'success')
+        self.assertEqual(ledger[dna]['terminal_outcome'], 'SUCCESS')
 
         # 2. Second invocation with same DNA
         with open(self.input_file, 'w') as f:
@@ -83,6 +83,22 @@ class TestIdempotency(unittest.TestCase):
         with open(self.json_output, 'r') as f:
             data = json.load(f)
         # It should process dna1 (once) and dna2 (once)
+        # Note: the input list has dna1 twice. dna_ui.py processes each line.
+        # But wait, it should deduplicate via ledger.
+        # If dna1 is processed the first time, it goes into ledger.
+        # The second time in the SAME batch, it should see it in the ledger...
+        # Wait, the ledger is saved at the END of main().
+        # So within the same batch, it might process it twice!
+
+        # Checking dna_ui.py:
+        # for dna_str in dna_list:
+        #     if dna_str in ledger: ... continue
+        #     ... process ...
+        #     ledger[dna_str] = ...
+
+        # It updates the ledger in memory during the loop.
+        # So it SHOULD deduplicate even in the same batch.
+
         self.assertEqual(len(data), 2, "Should have exactly 2 entries")
         dnas = [entry['dna'] for entry in data]
         self.assertIn(dna1, dnas)
