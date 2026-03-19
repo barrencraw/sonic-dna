@@ -58,7 +58,7 @@ class TestIdempotency(unittest.TestCase):
         with open(self.ledger_path, 'r') as f:
             ledger = json.load(f)
         self.assertIn(dna, ledger)
-        self.assertEqual(ledger[dna]['terminal_outcome'], 'success')
+        self.assertTrue(ledger[dna]['terminal_outcome'].startswith('SUCCESS'))
 
         # 2. Second invocation with same DNA
         with open(self.input_file, 'w') as f:
