@@ -33,6 +33,9 @@ import time
 import threading
 import argparse
 
+# Check if we are running in a test environment
+is_test = 'unittest' in sys.modules or 'pytest' in sys.modules
+
 # ─── Import the batch parser and the GUI window ───────────────────────────────
 from utils.dna_ui import main as run_batch
 from utils.providers import RngProvider
@@ -68,10 +71,13 @@ def watch_loop():
     Continuously watch data/raw/toSequence.txt. Whenever new non‐empty content appears,
     run the batch parser and then clear toSequence.txt. Sleeps 1 second between checks.
     """
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    os.chdir(script_dir)
+    if not is_test:
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        os.chdir(script_dir)
 
-    raw_folder = os.path.join(script_dir, 'data', 'raw')
+    base_dir = os.getcwd()
+
+    raw_folder = os.path.join(base_dir, 'data', 'raw')
     output_folder = os.path.join(script_dir, 'data', 'output')
     ensure_folder(raw_folder)
     ensure_folder(output_folder)
@@ -123,11 +129,14 @@ def process_once():
     Run the batch parser exactly once (reads all lines from toSequence.txt,
     writes output JSON+CSV, then exits).
     """
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    os.chdir(script_dir)
+    if not is_test:
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        os.chdir(script_dir)
 
-    raw_folder = os.path.join(script_dir, 'data', 'raw')
-    output_folder = os.path.join(script_dir, 'data', 'output')
+    base_dir = os.getcwd()
+
+    raw_folder = os.path.join(base_dir, 'data', 'raw')
+    output_folder = os.path.join(base_dir, 'data', 'output')
     ensure_folder(raw_folder)
     ensure_folder(output_folder)
 
@@ -176,8 +185,9 @@ def main():
 
     # Launch PySide6 GUI
     # Ensure working directory is project root
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    os.chdir(script_dir)
+    if not is_test:
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        os.chdir(script_dir)
 
     app = QApplication(sys.argv)
 
