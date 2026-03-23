@@ -32,12 +32,17 @@ import sys
 import time
 import threading
 import argparse
+import uuid
 
 # ─── Import the batch parser and the GUI window ───────────────────────────────
 from utils.dna_ui import main as run_batch
 from utils.providers import RngProvider
-from PySide6.QtWidgets import QApplication
-from ui.main_window import MainWindow
+try:
+    from PySide6.QtWidgets import QApplication
+    from ui.main_window import MainWindow
+    PYSIDE_AVAILABLE = True
+except ImportError:
+    PYSIDE_AVAILABLE = False
 
 # ─── UTILITY FUNCTIONS ────────────────────────────────────────────────────────
 
@@ -89,8 +94,11 @@ def watch_loop():
                 timestamp = time.strftime('%Y-%m-%d %H:%M:%S')
                 print(f"[{timestamp}] New DNA detected → running parser…")
 
+                correlation_id = str(uuid.uuid4())
+                actor_id = "watcher"
+
                 try:
-                    run_batch()
+                    run_batch(correlation_id=correlation_id, actor_id=actor_id)
                     # Only clear the input file if run_batch() succeeds
                     clear_input_file(input_file)
                     print(f"[{timestamp}] Parsing complete. Cleared toSequence.txt.\n")
@@ -137,8 +145,12 @@ def process_once():
         return
 
     print("[Once‐Runner] Processing all DNA strings once…")
+
+    correlation_id = str(uuid.uuid4())
+    actor_id = "once_runner"
+
     try:
-        run_batch()
+        run_batch(correlation_id=correlation_id, actor_id=actor_id)
         print("[Once‐Runner] Done.")
     except Exception as e:
         from utils.dna_ui import DNAProcessingError
@@ -169,15 +181,23 @@ def main():
         process_once()
         return
 
-    # Otherwise: start watcher, then launch GUI
+    # Otherwise: start watcher
     watcher_thread = threading.Thread(target=watch_loop, daemon=True)
     watcher_thread.start()
     print("[main.py] Watcher thread started in background.")
 
-    # Launch PySide6 GUI
+    # Launch PySide6 GUI if available
     # Ensure working directory is project root
     script_dir = os.path.dirname(os.path.abspath(__file__))
     os.chdir(script_dir)
+
+    if not PYSIDE_AVAILABLE:
+        print("[main.py] PySide6 not found. Running only watcher. Press Ctrl+C to exit.")
+        try:
+            while True:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            sys.exit(0)
 
     app = QApplication(sys.argv)
 

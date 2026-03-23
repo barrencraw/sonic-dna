@@ -36,9 +36,7 @@ class TestIdempotency(unittest.TestCase):
         if os.path.exists(self.data_folder):
             shutil.rmtree(self.data_folder)
         if os.path.exists(self.backup_folder):
-            # Check if backup exists before moving
-            if os.path.exists(self.backup_folder):
-                shutil.move(self.backup_folder, self.data_folder)
+            shutil.move(self.backup_folder, self.data_folder)
 
     def test_double_invocation_same_key(self):
         # DNA for Volume (prefix 'VOL')
@@ -48,7 +46,7 @@ class TestIdempotency(unittest.TestCase):
         with open(self.input_file, 'w') as f:
             f.write(dna + "\n")
 
-        run_batch()
+        run_batch(correlation_id="test_cid_1", actor_id="test_actor")
 
         with open(self.json_output, 'r') as f:
             data = json.load(f)
@@ -58,13 +56,13 @@ class TestIdempotency(unittest.TestCase):
         with open(self.ledger_path, 'r') as f:
             ledger = json.load(f)
         self.assertIn(dna, ledger)
-        self.assertEqual(ledger[dna]['terminal_outcome'], 'success')
+        self.assertEqual(ledger[dna]['terminal_outcome'], 'SUCCESS')
 
         # 2. Second invocation with same DNA
         with open(self.input_file, 'w') as f:
             f.write(dna + "\n")
 
-        run_batch()
+        run_batch(correlation_id="test_cid_2", actor_id="test_actor")
 
         # Verify no duplicate entry in output
         with open(self.json_output, 'r') as f:
@@ -78,7 +76,7 @@ class TestIdempotency(unittest.TestCase):
         with open(self.input_file, 'w') as f:
             f.write(f"{dna1}\n{dna1}\n{dna2}\n")
 
-        run_batch()
+        run_batch(correlation_id="test_cid_mixed", actor_id="test_actor")
 
         with open(self.json_output, 'r') as f:
             data = json.load(f)
@@ -89,24 +87,16 @@ class TestIdempotency(unittest.TestCase):
         self.assertIn(dna2, dnas)
 
     def test_retry_after_transient_failure(self):
-        # We'll simulate a transient failure by corrupting the output after a successful process
-        # and then re-running.
         dna = "VOL08900750712"
 
         with open(self.input_file, 'w') as f:
             f.write(dna + "\n")
 
-        run_batch() # Success
+        run_batch(correlation_id="test_cid_retry", actor_id="test_actor") # Success
 
         with open(self.ledger_path, 'r') as f:
             ledger = json.load(f)
         self.assertIn(dna, ledger)
-
-        # Simulate a crash where the output file was lost but ledger remained (or vice-versa)
-        # If output file is lost, next run should NOT re-process if it's in the ledger.
-        # WAIT: The requirement is "retry after transient failure → eventual consistency without corruption".
-        # If the output file is cumulative and we lose it, but keep the ledger, we might miss the data.
-        # But idempotency usually means "don't do it again if you already did it".
 
         # Let's test if it handles corrupted output file gracefully.
         with open(self.json_output, 'w') as f:
@@ -116,7 +106,7 @@ class TestIdempotency(unittest.TestCase):
         with open(self.input_file, 'w') as f:
             f.write(new_dna + "\n")
 
-        run_batch() # This should load the corrupted file, reset it to [], and add the new_dna
+        run_batch(correlation_id="test_cid_recovery", actor_id="test_actor") # This should load the corrupted file, reset it to [], and add the new_dna
 
         with open(self.json_output, 'r') as f:
             data = json.load(f)
