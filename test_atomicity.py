@@ -17,6 +17,11 @@ import shutil
 import tempfile
 import json
 from unittest.mock import patch, MagicMock
+
+# Force fresh import of main
+if 'main' in sys.modules:
+    del sys.modules['main']
+import main
 from utils.dna_ui import main as run_batch, PersistenceError, DNAProcessingError
 
 class TestAtomicity(unittest.TestCase):
@@ -52,7 +57,8 @@ class TestAtomicity(unittest.TestCase):
 
     def tearDown(self):
         os.chdir(self.old_cwd)
-        shutil.rmtree(self.test_dir)
+        if os.path.exists(self.test_dir):
+            shutil.rmtree(self.test_dir)
 
     def test_successful_parsing(self):
         """Verify that parsing works correctly under normal conditions."""
@@ -95,17 +101,18 @@ class TestAtomicity(unittest.TestCase):
 
     def test_watcher_behavior_on_failure(self):
         """Test main.py's logic: if run_batch fails, input file should NOT be cleared."""
-        # Force import after mocks
+        # Force fresh import of main inside test to ensure patch works
         if 'main' in sys.modules:
             del sys.modules['main']
         import main
 
-        # We'll mock run_batch to fail
-        with patch('main.run_batch', side_effect=PersistenceError("Failed")):
+        # We'll mock run_batch in main to fail
+        # Patching main.run_batch because it's what process_once calls
+        with patch('main.run_batch', side_effect=DNAProcessingError("Failed")):
             with patch('main.clear_input_file') as mock_clear:
-                with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
+                with self.assertRaises(SystemExit) as cm:
                     main.process_once()
-
+                self.assertEqual(cm.exception.code, 1)
                 mock_clear.assert_not_called()
 
         # Verify file still has content

@@ -1,15 +1,30 @@
-import numpy as np
+try:
+    import numpy as np
+    HAS_NUMPY = True
+except ImportError:
+    HAS_NUMPY = False
+
+try:
+    from scipy.io.wavfile import write as write_wav
+    HAS_SCIPY = True
+except ImportError:
+    HAS_SCIPY = False
+
 try:
     import sounddevice as sd
-except OSError:
+except (OSError, ImportError):
     sd = None
-from scipy.io.wavfile import write as write_wav
+
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFileDialog, QComboBox
 )
 from PySide6.QtGui import QPainter, QPen, QColor
 
+import random
+import math
+
+# Constants
 SAMPLE_RATE = 44100
 DURATION = 2.0
 FREQ = 440
@@ -40,112 +55,231 @@ BASE_SOUNDS = [
 ]
 
 def gen_wave(wave_type, volume=0.8, rng=None):
-    t = np.linspace(0, DURATION, int(SAMPLE_RATE * DURATION), endpoint=False)
+    num_samples = int(SAMPLE_RATE * DURATION)
+
+    if HAS_NUMPY:
+        t = np.linspace(0, DURATION, num_samples, endpoint=False)
+    else:
+        t = [i / SAMPLE_RATE for i in range(num_samples)]
 
     if rng is None:
         from utils.providers import RngProvider
         rng = RngProvider()
 
     if wave_type == "Sine Wave":
-        return volume * np.sin(2 * np.pi * FREQ * t)
+        if HAS_NUMPY:
+            return volume * np.sin(2 * np.pi * FREQ * t)
+        else:
+            return [volume * math.sin(2 * math.pi * FREQ * ti) for ti in t]
+
     elif wave_type == "Square Wave":
-        return volume * np.sign(np.sin(2 * np.pi * FREQ * t))
+        if HAS_NUMPY:
+            return volume * np.sign(np.sin(2 * np.pi * FREQ * t))
+        else:
+            return [volume * (1 if math.sin(2 * math.pi * FREQ * ti) >= 0 else -1) for ti in t]
+
     elif wave_type == "Triangle Wave":
-        return volume * (2 * np.abs(2 * ((t * FREQ) % 1) - 1) - 1)
+        if HAS_NUMPY:
+            return volume * (2 * np.abs(2 * ((t * FREQ) % 1) - 1) - 1)
+        else:
+            return [volume * (2 * abs(2 * ((ti * FREQ) % 1) - 1) - 1) for ti in t]
+
     elif wave_type == "Sawtooth Wave":
-        return volume * (2 * ((t * FREQ) % 1) - 1)
+        if HAS_NUMPY:
+            return volume * (2 * ((t * FREQ) % 1) - 1)
+        else:
+            return [volume * (2 * ((ti * FREQ) % 1) - 1) for ti in t]
+
     elif wave_type == "Pulse Wave":
         pulse_width = 0.2
-        return volume * np.where((t * FREQ) % 1 < pulse_width, 1, -1)
+        if HAS_NUMPY:
+            return volume * np.where((t * FREQ) % 1 < pulse_width, 1, -1)
+        else:
+            return [volume * (1 if (ti * FREQ) % 1 < pulse_width else -1) for ti in t]
+
     elif wave_type == "Supersaw":
-        detune = [FREQ*0.98, FREQ*0.99, FREQ, FREQ*1.01, FREQ*1.02]
-        sum_saws = sum(np.sin(2 * np.pi * d * t) for d in detune)
-        return volume * (sum_saws / len(detune))
+        detunes = [FREQ*0.98, FREQ*0.99, FREQ, FREQ*1.01, FREQ*1.02]
+        if HAS_NUMPY:
+            sum_saws = sum(np.sin(2 * np.pi * d * t) for d in detunes)
+            return volume * (sum_saws / len(detunes))
+        else:
+            res = []
+            for ti in t:
+                s = sum(math.sin(2 * math.pi * d * ti) for d in detunes)
+                res.append(volume * (s / len(detunes)))
+            return res
+
     elif wave_type == "Organ (Additive)":
         harmonics = [1, 2, 3, 4, 5]
         amps = [1.0, 0.5, 0.25, 0.13, 0.06]
-        organ = sum(a * np.sin(2 * np.pi * FREQ * h * t) for a, h in zip(amps, harmonics))
-        return volume * (organ / sum(amps))
+        if HAS_NUMPY:
+            organ = sum(a * np.sin(2 * np.pi * FREQ * h * t) for a, h in zip(amps, harmonics))
+            return volume * (organ / sum(amps))
+        else:
+            res = []
+            total_amp = sum(amps)
+            for ti in t:
+                s = sum(a * math.sin(2 * math.pi * FREQ * h * ti) for a, h in zip(amps, harmonics))
+                res.append(volume * (s / total_amp))
+            return res
+
     elif wave_type == "Ring Modulated":
         mod_freq = 55
-        return volume * np.sin(2 * np.pi * FREQ * t) * np.sin(2 * np.pi * mod_freq * t)
+        if HAS_NUMPY:
+            return volume * np.sin(2 * np.pi * FREQ * t) * np.sin(2 * np.pi * mod_freq * t)
+        else:
+            return [volume * math.sin(2 * math.pi * FREQ * ti) * math.sin(2 * math.pi * mod_freq * ti) for ti in t]
+
     elif wave_type == "Impulse":
-        data = np.zeros_like(t)
-        data[0] = 1
-        return volume * data
+        if HAS_NUMPY:
+            data = np.zeros_like(t)
+            data[0] = 1
+            return volume * data
+        else:
+            data = [0.0] * num_samples
+            data[0] = 1.0
+            return [volume * d for d in data]
+
     elif wave_type == "Click":
-        data = np.zeros_like(t)
-        data[:int(0.002 * SAMPLE_RATE)] = 1
-        return volume * data
+        click_samples = int(0.002 * SAMPLE_RATE)
+        if HAS_NUMPY:
+            data = np.zeros_like(t)
+            data[:click_samples] = 1
+            return volume * data
+        else:
+            data = [1.0 if i < click_samples else 0.0 for i in range(num_samples)]
+            return [volume * d for d in data]
+
     elif wave_type == "Burst":
-        data = np.zeros_like(t)
         burst_len = int(0.1 * SAMPLE_RATE)
-        data[:burst_len] = np.sin(2 * np.pi * FREQ * t[:burst_len])
-        return volume * data
+        if HAS_NUMPY:
+            data = np.zeros_like(t)
+            data[:burst_len] = np.sin(2 * np.pi * FREQ * t[:burst_len])
+            return volume * data
+        else:
+            data = [math.sin(2 * math.pi * FREQ * ti) if i < burst_len else 0.0 for i, ti in enumerate(t)]
+            return [volume * d for d in data]
+
     elif wave_type == "DC Offset":
-        return volume * np.ones_like(t)
+        if HAS_NUMPY:
+            return volume * np.ones_like(t)
+        else:
+            return [volume] * num_samples
+
     elif wave_type == "Silence":
-        return np.zeros_like(t)
+        if HAS_NUMPY:
+            return np.zeros_like(t)
+        else:
+            return [0.0] * num_samples
+
     elif wave_type == "Sample & Hold":
         steps = 32
-        step_len = len(t) // steps
+        step_len = num_samples // steps
         vals = rng.uniform(-1, 1, steps)
-        data = np.repeat(vals, step_len)
-        data = np.pad(data, (0, len(t) - len(data)))
-        return volume * data
+        if HAS_NUMPY:
+            data = np.repeat(vals, step_len)
+            data = np.pad(data, (0, num_samples - len(data)))
+            return volume * data
+        else:
+            data = []
+            for v in vals:
+                data.extend([v] * step_len)
+            while len(data) < num_samples:
+                data.append(0.0)
+            return [volume * d for d in data]
+
     elif wave_type == "Stepped Random":
         steps = 16
-        idx = np.floor(np.linspace(0, steps, len(t))).astype(int)
         vals = rng.uniform(-1, 1, steps+1)
-        return volume * vals[idx]
+        if HAS_NUMPY:
+            idx = np.floor(np.linspace(0, steps, num_samples)).astype(int)
+            return volume * vals[idx]
+        else:
+            data = []
+            for i in range(num_samples):
+                idx = int((i / num_samples) * steps)
+                data.append(volume * vals[idx])
+            return data
+
     elif wave_type == "Linear Chirp":
         f0, f1 = 220, 1760
-        chirp = np.sin(2 * np.pi * (f0 + (f1 - f0) * t / DURATION / 2) * t)
-        return volume * chirp
+        if HAS_NUMPY:
+            chirp = np.sin(2 * np.pi * (f0 + (f1 - f0) * t / DURATION / 2) * t)
+            return volume * chirp
+        else:
+            return [volume * math.sin(2 * math.pi * (f0 + (f1 - f0) * ti / DURATION / 2) * ti) for ti in t]
+
     elif wave_type == "White Noise":
-        return volume * rng.uniform(-1, 1, len(t))
+        return [volume * v for v in rng.uniform(-1, 1, num_samples)]
+
     elif wave_type == "Pink Noise":
-        nrows, ncols = 16, len(t)
-        array = rng.standard_normal((nrows, ncols))
-        array = np.cumsum(array, axis=0)
-        pink = array[-1] / np.max(np.abs(array[-1]))
-        return volume * pink
+        # Simplified pink noise implementation if numpy is missing
+        if HAS_NUMPY:
+            nrows, ncols = 16, num_samples
+            array = rng.standard_normal((nrows, ncols))
+            array = np.cumsum(array, axis=0)
+            pink = array[-1] / np.max(np.abs(array[-1]))
+            return volume * pink
+        else:
+            # Fallback to white noise for simplicity in non-numpy env
+            return [volume * v for v in rng.uniform(-1, 1, num_samples)]
+
     elif wave_type == "Brown Noise":
-        wn = rng.uniform(-1, 1, len(t))
-        brown = np.cumsum(wn)
-        brown = brown / np.max(np.abs(brown))
-        return volume * brown
-    elif wave_type == "Blue Noise":
-        white = rng.normal(0, 1, len(t))
-        fft = np.fft.rfft(white)
-        freqs = np.fft.rfftfreq(len(white), 1 / SAMPLE_RATE)
-        fft *= np.sqrt(freqs)
-        blue = np.fft.irfft(fft)
-        blue = blue / np.max(np.abs(blue))
-        return volume * blue
-    elif wave_type == "Violet Noise":
-        white = rng.normal(0, 1, len(t))
-        fft = np.fft.rfft(white)
-        freqs = np.fft.rfftfreq(len(white), 1 / SAMPLE_RATE)
-        fft *= freqs
-        violet = np.fft.irfft(fft)
-        violet = violet / np.max(np.abs(violet))
-        return volume * violet
-    elif wave_type == "Grey Noise":
-        white = rng.normal(0, 1, len(t))
-        eq_curve = np.linspace(0.6, 1.2, len(white))
-        return volume * (white * eq_curve / np.max(np.abs(white * eq_curve)))
+        wn = rng.uniform(-1, 1, num_samples)
+        if HAS_NUMPY:
+            brown = np.cumsum(wn)
+            brown = brown / np.max(np.abs(brown))
+            return volume * brown
+        else:
+            brown = []
+            curr = 0
+            for v in wn:
+                curr += v
+                brown.append(curr)
+            m = max(abs(b) for b in brown) if brown else 1
+            return [volume * b / m for b in brown]
+
+    # Blue, Violet, Grey Noise heavily depend on FFT or complex array ops.
+    # We provide basic white noise fallback if no numpy.
+    elif wave_type in ["Blue Noise", "Violet Noise", "Grey Noise"]:
+        if HAS_NUMPY:
+            white = rng.normal(0, 1, num_samples)
+            fft = np.fft.rfft(white)
+            freqs = np.fft.rfftfreq(num_samples, 1 / SAMPLE_RATE)
+            if wave_type == "Blue Noise":
+                fft *= np.sqrt(freqs)
+            elif wave_type == "Violet Noise":
+                fft *= freqs
+            elif wave_type == "Grey Noise":
+                # Grey noise simplified as EQ'd white
+                eq_curve = np.linspace(0.6, 1.2, num_samples)
+                return volume * (white * eq_curve / np.max(np.abs(white * eq_curve)))
+
+            res = np.fft.irfft(fft)
+            res = res / np.max(np.abs(res))
+            return volume * res
+        else:
+            return [volume * v for v in rng.uniform(-1, 1, num_samples)]
+
     else:
-        return np.zeros_like(t)
+        return [0.0] * num_samples
 
 class WaveformWidget(QWidget):
     def __init__(self):
         super().__init__()
-        self.data = np.zeros(512)
+        if HAS_NUMPY:
+            self.data = np.zeros(512)
+        else:
+            self.data = [0.0] * 512
         self.setMinimumHeight(140)
 
     def set_wave(self, data):
-        self.data = data[:512] if len(data) > 512 else np.pad(data, (0, max(0, 512 - len(data))))
+        if HAS_NUMPY:
+            self.data = data[:512] if len(data) > 512 else np.pad(data, (0, max(0, 512 - len(data))))
+        else:
+            self.data = data[:512]
+            while len(self.data) < 512:
+                self.data.append(0.0)
         self.update()
 
     def paintEvent(self, event):
@@ -226,6 +360,11 @@ class MusicPanel(QWidget):
         if self.current_wave is not None:
             file_path, _ = QFileDialog.getSaveFileName(self, "Save WAV File", "sound.wav", "WAV Files (*.wav)")
             if file_path:
-                # Normalize to 16-bit PCM for WAV export
-                audio = (self.current_wave * 32767).astype(np.int16)
-                write_wav(file_path, SAMPLE_RATE, audio)
+                if HAS_NUMPY:
+                    # Normalize to 16-bit PCM for WAV export
+                    audio = (self.current_wave * 32767).astype(np.int16)
+                    if HAS_SCIPY:
+                        write_wav(file_path, SAMPLE_RATE, audio)
+                else:
+                    # Manual basic WAV export is complex, skipped if no numpy/scipy
+                    print("WAV export requires numpy and scipy.")
