@@ -1,5 +1,5 @@
 import sys
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 # Mock dependencies before any imports
 mock_pyside6 = MagicMock()
@@ -16,7 +16,6 @@ import os
 import shutil
 import tempfile
 import json
-from unittest.mock import patch, MagicMock
 from utils.dna_ui import main as run_batch, PersistenceError, DNAProcessingError
 
 class TestAtomicity(unittest.TestCase):
@@ -98,10 +97,20 @@ class TestAtomicity(unittest.TestCase):
         # Force import after mocks
         if 'main' in sys.modules:
             del sys.modules['main']
+
+        # We need to mock DNAProcessingError as it's used for isinstance check in main.py
+        import utils.dna_ui
+
+        # Mock numpy/scipy to avoid import issues
+        sys.modules["numpy"] = MagicMock()
+        sys.modules["scipy"] = MagicMock()
+        sys.modules["scipy.io"] = MagicMock()
+        sys.modules["scipy.io.wavfile"] = MagicMock()
+
         import main
 
         # We'll mock run_batch to fail
-        with patch('main.run_batch', side_effect=PersistenceError("Failed")):
+        with patch('main.run_batch', side_effect=utils.dna_ui.PersistenceError("Failed")):
             with patch('main.clear_input_file') as mock_clear:
                 with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
                     main.process_once()
