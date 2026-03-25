@@ -21,11 +21,11 @@
     - Inconsistency between JSON and CSV.
     - Infinite re-processing loop if watcher is running and input isn't cleared.
 
-### Proposed Solution
-Implement an **Atomic Write + Commit** pattern:
-1. Write JSON and CSV to a temporary directory.
-2. Once both are fully written and flushed, rename them to their final destinations (Atomic Rename).
-3. Only after both renames succeed, truncate `data/raw/toSequence.txt`.
+### Proposed Solution (IMPLEMENTED)
+Implemented an **Atomic Write + Commit** pattern:
+1. Write JSON, CSV, and the Processed Ledger to a temporary directory.
+2. Once all are fully written and flushed/synced (`os.fsync`), rename them to their final destinations (Atomic Rename).
+3. Only after all renames succeed, the caller (`main.py`) truncates `data/raw/toSequence.txt`.
 
 ---
 

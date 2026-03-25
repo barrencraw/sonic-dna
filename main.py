@@ -41,6 +41,13 @@ from ui.main_window import MainWindow
 
 # ─── UTILITY FUNCTIONS ────────────────────────────────────────────────────────
 
+def get_base_dir():
+    """Return the base directory for data and rules."""
+    is_test = 'pytest' in sys.modules or 'unittest' in sys.modules
+    if is_test:
+        return os.getcwd()
+    return os.path.dirname(os.path.abspath(__file__))
+
 def ensure_folder(path: str):
     """Create the folder if it doesn’t exist."""
     if not os.path.isdir(path):
@@ -68,11 +75,13 @@ def watch_loop():
     Continuously watch data/raw/toSequence.txt. Whenever new non‐empty content appears,
     run the batch parser and then clear toSequence.txt. Sleeps 1 second between checks.
     """
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    os.chdir(script_dir)
+    base_dir = get_base_dir()
+    # Avoid changing directory during tests to maintain temporary test paths
+    if 'unittest' not in sys.modules and 'pytest' not in sys.modules:
+        os.chdir(base_dir)
 
-    raw_folder = os.path.join(script_dir, 'data', 'raw')
-    output_folder = os.path.join(script_dir, 'data', 'output')
+    raw_folder = os.path.join(base_dir, 'data', 'raw')
+    output_folder = os.path.join(base_dir, 'data', 'output')
     ensure_folder(raw_folder)
     ensure_folder(output_folder)
 
@@ -123,11 +132,12 @@ def process_once():
     Run the batch parser exactly once (reads all lines from toSequence.txt,
     writes output JSON+CSV, then exits).
     """
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    os.chdir(script_dir)
+    base_dir = get_base_dir()
+    if 'unittest' not in sys.modules and 'pytest' not in sys.modules:
+        os.chdir(base_dir)
 
-    raw_folder = os.path.join(script_dir, 'data', 'raw')
-    output_folder = os.path.join(script_dir, 'data', 'output')
+    raw_folder = os.path.join(base_dir, 'data', 'raw')
+    output_folder = os.path.join(base_dir, 'data', 'output')
     ensure_folder(raw_folder)
     ensure_folder(output_folder)
 
@@ -176,8 +186,9 @@ def main():
 
     # Launch PySide6 GUI
     # Ensure working directory is project root
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    os.chdir(script_dir)
+    base_dir = get_base_dir()
+    if 'unittest' not in sys.modules and 'pytest' not in sys.modules:
+        os.chdir(base_dir)
 
     app = QApplication(sys.argv)
 
