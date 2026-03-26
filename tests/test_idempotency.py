@@ -1,5 +1,6 @@
 import os
 import json
+import csv
 import shutil
 import unittest
 import time
@@ -104,9 +105,6 @@ class TestIdempotency(unittest.TestCase):
 
         # Simulate a crash where the output file was lost but ledger remained (or vice-versa)
         # If output file is lost, next run should NOT re-process if it's in the ledger.
-        # WAIT: The requirement is "retry after transient failure → eventual consistency without corruption".
-        # If the output file is cumulative and we lose it, but keep the ledger, we might miss the data.
-        # But idempotency usually means "don't do it again if you already did it".
 
         # Let's test if it handles corrupted output file gracefully.
         with open(self.json_output, 'w') as f:
@@ -125,6 +123,49 @@ class TestIdempotency(unittest.TestCase):
         # Only VOL00000000000 is in the new output.
         self.assertEqual(len(data), 1)
         self.assertEqual(data[0]['dna'], new_dna)
+
+    def test_telemetry_fields(self):
+        """Verify that observability logs contain correlation_id and actor_id."""
+        dna = "VOL08900750712"
+        with open(self.input_file, 'w') as f:
+            f.write(dna + "\n")
+
+        import io
+        from unittest.mock import patch
+
+        with patch('sys.stdout', new=io.StringIO()) as fake_out:
+            run_batch(correlation_id="test-uuid", actor_id="test-actor")
+            output = fake_out.getvalue()
+
+        self.assertIn("[START] dna_batch_chain correlation_id=test-uuid actor_id=test-actor", output)
+        self.assertIn(f"[STEP] dna_batch_chain correlation_id=test-uuid actor_id=test-actor processing_dna key={dna}", output)
+        self.assertIn(f"[Idempotency] dna_batch_chain correlation_id=test-uuid actor_id=test-actor key={dna} dedupe_hit=False terminal_outcome=success", output)
+        self.assertIn("[END] dna_batch_chain correlation_id=test-uuid actor_id=test-actor outcome=SUCCESS", output)
+
+    def test_cumulative_csv(self):
+        """Verify that CSV output is cumulative across multiple runs."""
+        dna1 = "VOL08900750712"
+        dna2 = "VOL00000000000"
+
+        # 1. Run 1
+        with open(self.input_file, 'w') as f:
+            f.write(dna1 + "\n")
+        run_batch()
+
+        # 2. Run 2
+        with open(self.input_file, 'w') as f:
+            f.write(dna2 + "\n")
+        run_batch()
+
+        csv_out = os.path.join(self.output_folder, 'toSequence_parsed.csv')
+        with open(csv_out, 'r', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            rows = list(reader)
+
+        self.assertEqual(len(rows), 2)
+        dnas = [r['dna'] for r in rows]
+        self.assertIn(dna1, dnas)
+        self.assertIn(dna2, dnas)
 
 if __name__ == '__main__':
     unittest.main()
