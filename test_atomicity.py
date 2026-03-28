@@ -95,20 +95,16 @@ class TestAtomicity(unittest.TestCase):
 
     def test_watcher_behavior_on_failure(self):
         """Test main.py's logic: if run_batch fails, input file should NOT be cleared."""
-        # Force import after mocks
-        if 'main' in sys.modules:
-            del sys.modules['main']
         import main
-
-        # We'll mock run_batch to fail
+        # We need to mock it exactly where it's used in main.py
         with patch('main.run_batch', side_effect=PersistenceError("Failed")):
             with patch('main.clear_input_file') as mock_clear:
-                with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
+                # Mock sys.exit on the module
+                with patch('main.sys.exit') as mock_exit:
                     main.process_once()
+                    mock_exit.assert_called_with(1)
+                    mock_clear.assert_not_called()
 
-                mock_clear.assert_not_called()
-
-        # Verify file still has content
         with open(self.input_file, 'r') as f:
             self.assertEqual(f.read().strip(), "V100")
 
