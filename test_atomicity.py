@@ -10,6 +10,9 @@ sys.modules["PySide6.QtGui"] = mock_pyside6
 sys.modules["torch"] = MagicMock()
 sys.modules["torchaudio"] = MagicMock()
 sys.modules["sounddevice"] = MagicMock()
+sys.modules["numpy"] = MagicMock()
+sys.modules["scipy"] = MagicMock()
+sys.modules["scipy.io.wavfile"] = MagicMock()
 
 import unittest
 import os
@@ -18,6 +21,10 @@ import tempfile
 import json
 from unittest.mock import patch, MagicMock
 from utils.dna_ui import main as run_batch, PersistenceError, DNAProcessingError
+
+# Re-expose DNAProcessingError for main module patch during test
+import utils.dna_ui
+sys.modules['utils.dna_ui'].DNAProcessingError = DNAProcessingError
 
 class TestAtomicity(unittest.TestCase):
     def setUp(self):
@@ -100,11 +107,22 @@ class TestAtomicity(unittest.TestCase):
             del sys.modules['main']
         import main
 
-        # We'll mock run_batch to fail
-        with patch('main.run_batch', side_effect=PersistenceError("Failed")):
+        # Path main.run_batch to fail
+        # We must use 'main.run_batch' because main.py does 'from utils.dna_ui import main as run_batch'
+        with patch('main.run_batch', side_effect=DNAProcessingError("Failed")):
             with patch('main.clear_input_file') as mock_clear:
-                with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
-                    main.process_once()
+                # Ensure the file exists so it doesn't return early
+                os.makedirs(os.path.dirname(self.input_file), exist_ok=True)
+                with open(self.input_file, 'w') as f:
+                    f.write("V100\n")
+
+                with self.assertRaises(SystemExit) as cm:
+                    # In main.py, process_once() does os.chdir(script_dir)
+                    # We need to make sure script_dir (where main.py is) is the test_dir
+                    with patch('os.path.dirname', return_value=self.test_dir):
+                        with patch('os.path.abspath', return_value=os.path.join(self.test_dir, 'main.py')):
+                            main.process_once()
+                self.assertEqual(cm.exception.code, 1)
 
                 mock_clear.assert_not_called()
 
