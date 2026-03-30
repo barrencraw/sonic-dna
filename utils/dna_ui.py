@@ -4,6 +4,7 @@ import json
 import csv
 import time
 from utils.dna_calculator import DNACalculator, RuleParseError
+from utils.integrity_manager import IntegrityManager
 
 def ensure_folder(path):
     if not os.path.isdir(path):
@@ -94,6 +95,16 @@ def main():
 
     ledger = load_ledger(ledger_path)
 
+    # Load system messages and integrity state
+    system_msg_path = os.path.join(project_root, 'data', 'system_messages.json')
+    system_messages = {}
+    if os.path.exists(system_msg_path):
+        with open(system_msg_path, 'r', encoding='utf-8') as f:
+            system_messages = json.load(f)
+
+    integrity_state_path = os.path.join(project_root, 'data', 'system_integrity.json')
+    integrity_manager = IntegrityManager(integrity_state_path)
+
     # 1) Load existing JSON output
     json_output_path = os.path.join(output_folder, 'toSequence_parsed.json')
     parsed_json = []
@@ -132,7 +143,42 @@ def main():
         print(f"[Idempotency] key={idempotency_key} dedupe_hit=False terminal_outcome=processing")
 
         try:
-            result = calculator.parse(dna_str)
+            # Check for refusal if integrity is zero
+            # To do this, we need to know the rule and values beforehand, or parse it first
+            # Since parsing is deterministic and shouldn't have side effects, we'll parse first.
+            try:
+                result = calculator.parse(dna_str)
+            except RuleParseError as e:
+                # Handle parse error immediately
+                parsed_json.append({'dna': dna_str, 'error': str(e)})
+                flat = {'dna': dna_str, 'error': str(e)}
+                csv_rows.append(flat)
+                all_flattened_keys.update(flat.keys())
+                outcome = f"error: {str(e)}"
+
+                # Apply standard wear even for errors?
+                # "Others: -2 wear" according to plan.
+                wear = integrity_manager.calculate_wear("error", {})
+                new_integrity = integrity_manager.apply_wear(wear)
+                print(f"[INTEGRITY] outcome=error wear={wear} new_integrity={new_integrity}")
+
+                ledger[idempotency_key] = {
+                    'terminal_outcome': outcome,
+                    'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
+                }
+                new_processed_count += 1
+                continue
+
+            # Identify if it's maintenance or if we're refused
+            if not integrity_manager.can_process(result['rule'], result['values']):
+                outcome = "REFUSAL"
+                reason = system_messages.get('refusal_reason', "INTEGRITY_LEVEL_CRITICAL")
+                hint = system_messages.get('next_action_hint', "Execute Maintenance.")
+                print(f"[REFUSAL] key={idempotency_key} reason={reason} hint={hint}")
+                # We do NOT record REFUSAL in the ledger to allow retries later
+                continue
+
+            # Process success
             entry = {
                 'dna': dna_str,
                 'rule': result['rule'],
@@ -148,17 +194,37 @@ def main():
             all_flattened_keys.update(flat.keys())
             outcome = "success"
 
-        except RuleParseError as e:
-            # On parse error, record as error entry
-            parsed_json.append({
-                'dna': dna_str,
-                'error': str(e)
-            })
-            # Also put a row in CSV listing error
+            # Apply wear
+            wear = integrity_manager.calculate_wear(result['rule'], result['values'])
+            new_integrity = integrity_manager.apply_wear(wear)
+            consequence = system_messages.get('consequence_applied', "WEAR: {wear}, INTEGRITY: {integrity}")
+            print(f"[INTEGRITY] outcome=success rule={result['rule']} wear={wear} new_integrity={new_integrity} msg={consequence.format(wear=wear, integrity=new_integrity)}")
+
+            ledger[idempotency_key] = {
+                'terminal_outcome': outcome,
+                'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
+            }
+            new_processed_count += 1
+
+        except Exception as e:
+            # Catch-all for unexpected processing errors
+            print(f"[ERROR] processing {dna_str}: {e}")
+            outcome = f"error: {str(e)}"
+            # Record it as error
+            parsed_json.append({'dna': dna_str, 'error': str(e)})
             flat = {'dna': dna_str, 'error': str(e)}
             csv_rows.append(flat)
             all_flattened_keys.update(flat.keys())
-            outcome = f"error: {str(e)}"
+
+            # Apply wear
+            wear = integrity_manager.calculate_wear("error", {})
+            new_integrity = integrity_manager.apply_wear(wear)
+
+            ledger[idempotency_key] = {
+                'terminal_outcome': outcome,
+                'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
+            }
+            new_processed_count += 1
 
     # ATOMIC WRITE PATTERN:
     # 1. Write to a temporary directory in the same filesystem as the output folder
@@ -171,6 +237,8 @@ def main():
     with tempfile.TemporaryDirectory(dir=output_folder) as tmp_dir:
         tmp_json = os.path.join(tmp_dir, 'output.json')
         tmp_csv = os.path.join(tmp_dir, 'output.csv')
+        tmp_ledger = os.path.join(tmp_dir, 'ledger.json')
+        tmp_integrity = os.path.join(tmp_dir, 'integrity.json')
 
         try:
             # 1) Write JSON output to temp
@@ -190,39 +258,26 @@ def main():
                 cf.flush()
                 os.fsync(cf.fileno())
 
-            # 3) Atomic rename (commit)
-            # On Unix, os.replace is atomic. On Windows, it replaces if it exists.
+            # 3) Write Ledger
+            with open(tmp_ledger, 'w', encoding='utf-8') as lf:
+                json.dump(ledger, lf, indent=2)
+                lf.flush()
+                os.fsync(lf.fileno())
+
+            # 4) Write Integrity State
+            with open(tmp_integrity, 'w', encoding='utf-8') as itf:
+                json.dump(integrity_manager.save_to_dict(), itf, indent=2)
+                itf.flush()
+                os.fsync(itf.fileno())
+
+            # 5) Atomic rename (commit)
             os.replace(tmp_json, json_output_path)
             os.replace(tmp_csv, csv_output_path)
+            os.replace(tmp_ledger, ledger_path)
+            os.replace(tmp_integrity, integrity_state_path)
 
         except Exception as e:
             raise PersistenceError("Failed to write output files atomically") from e
-
-    print(f"[OK] Parsed {len(dna_list)} DNA strings.")
-        ledger[idempotency_key] = {
-            'terminal_outcome': outcome,
-            'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
-        }
-        print(f"[Idempotency] key={idempotency_key} dedupe_hit=False terminal_outcome={outcome}")
-        new_processed_count += 1
-
-    if new_processed_count > 0:
-        # Save ledger
-        save_ledger(ledger_path, ledger)
-
-        # Write JSON output
-        with open(json_output_path, 'w', encoding='utf-8') as jf:
-            json.dump(parsed_json, jf, indent=2)
-
-        # Write CSV output
-        fieldnames = sorted(all_flattened_keys)
-        with open(csv_output_path, 'w', newline='', encoding='utf-8') as cf:
-            writer = csv.DictWriter(cf, fieldnames=fieldnames)
-            writer.writeheader()
-            for row in csv_rows:
-                # Ensure every field in fieldnames
-                out = {k: row.get(k, '') for k in fieldnames}
-                writer.writerow(out)
 
     print(f"[OK] Processed {new_processed_count} new DNA strings. Total in ledger: {len(ledger)}")
     print(f"     JSON → {json_output_path}")
