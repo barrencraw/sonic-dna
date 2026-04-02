@@ -10,14 +10,18 @@ sys.modules["PySide6.QtGui"] = mock_pyside6
 sys.modules["torch"] = MagicMock()
 sys.modules["torchaudio"] = MagicMock()
 sys.modules["sounddevice"] = MagicMock()
+sys.modules["numpy"] = MagicMock()
+sys.modules["scipy"] = MagicMock()
+sys.modules["scipy.io"] = MagicMock()
+sys.modules["scipy.io.wavfile"] = MagicMock()
 
 import unittest
 import os
 import shutil
 import tempfile
 import json
-from unittest.mock import patch, MagicMock
-from utils.dna_ui import main as run_batch, PersistenceError, DNAProcessingError
+from unittest.mock import patch
+from utils.dna_ui import main as run_batch, PersistenceError
 
 class TestAtomicity(unittest.TestCase):
     def setUp(self):
@@ -47,6 +51,10 @@ class TestAtomicity(unittest.TestCase):
                 }
             }, f)
 
+        self.ledger_path = os.path.join(self.data_dir, 'processed_ledger.json')
+        self.json_out = os.path.join(self.output_dir, 'toSequence_parsed.json')
+        self.csv_out = os.path.join(self.output_dir, 'toSequence_parsed.csv')
+
         self.old_cwd = os.getcwd()
         os.chdir(self.test_dir)
 
@@ -58,28 +66,29 @@ class TestAtomicity(unittest.TestCase):
         """Verify that parsing works correctly under normal conditions."""
         run_batch()
 
-        json_out = os.path.join(self.output_dir, 'toSequence_parsed.json')
-        csv_out = os.path.join(self.output_dir, 'toSequence_parsed.csv')
+        self.assertTrue(os.path.exists(self.json_out))
+        self.assertTrue(os.path.exists(self.csv_out))
+        self.assertTrue(os.path.exists(self.ledger_path))
 
-        self.assertTrue(os.path.exists(json_out))
-        self.assertTrue(os.path.exists(csv_out))
-
-        with open(json_out, 'r') as f:
+        with open(self.json_out, 'r') as f:
             data = json.load(f)
             self.assertEqual(len(data), 1)
             self.assertEqual(data[0]['dna'], 'V100')
 
-    def test_crash_during_json_write(self):
-        """Simulate a crash during JSON writing. No output files should be created."""
+        with open(self.ledger_path, 'r') as f:
+            ledger = json.load(f)
+            self.assertIn('V100', ledger)
+            self.assertEqual(ledger['V100']['terminal_outcome'], 'success')
+
+    def test_crash_during_write(self):
+        """Simulate a crash during writing. No output files should be created."""
         with patch('json.dump', side_effect=IOError("Disk Full")):
             with self.assertRaises(PersistenceError):
                 run_batch()
 
-        json_out = os.path.join(self.output_dir, 'toSequence_parsed.json')
-        csv_out = os.path.join(self.output_dir, 'toSequence_parsed.csv')
-
-        self.assertFalse(os.path.exists(json_out))
-        self.assertFalse(os.path.exists(csv_out))
+        self.assertFalse(os.path.exists(self.json_out))
+        self.assertFalse(os.path.exists(self.csv_out))
+        self.assertFalse(os.path.exists(self.ledger_path))
 
     def test_crash_during_rename(self):
         """Simulate a crash/failure during the atomic rename. No output files should be created/updated."""
@@ -87,11 +96,9 @@ class TestAtomicity(unittest.TestCase):
             with self.assertRaises(PersistenceError):
                 run_batch()
 
-        json_out = os.path.join(self.output_dir, 'toSequence_parsed.json')
-        csv_out = os.path.join(self.output_dir, 'toSequence_parsed.csv')
-
-        self.assertFalse(os.path.exists(json_out))
-        self.assertFalse(os.path.exists(csv_out))
+        self.assertFalse(os.path.exists(self.json_out))
+        self.assertFalse(os.path.exists(self.csv_out))
+        self.assertFalse(os.path.exists(self.ledger_path))
 
     def test_watcher_behavior_on_failure(self):
         """Test main.py's logic: if run_batch fails, input file should NOT be cleared."""
@@ -100,13 +107,16 @@ class TestAtomicity(unittest.TestCase):
             del sys.modules['main']
         import main
 
-        # We'll mock run_batch to fail
-        with patch('main.run_batch', side_effect=PersistenceError("Failed")):
-            with patch('main.clear_input_file') as mock_clear:
-                with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
-                    main.process_once()
+        # Need to ensure main's idea of current directory is our test_dir
+        with patch('os.path.dirname', return_value=self.test_dir):
+            with patch('os.path.abspath', return_value=self.test_dir):
+                # Mock run_batch to fail with PersistenceError
+                with patch('main.run_batch', side_effect=PersistenceError("Failed")):
+                    with patch('main.clear_input_file') as mock_clear:
+                        with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
+                            main.process_once()
 
-                mock_clear.assert_not_called()
+                        mock_clear.assert_not_called()
 
         # Verify file still has content
         with open(self.input_file, 'r') as f:
