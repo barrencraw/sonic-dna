@@ -15,6 +15,7 @@ class TestIdempotency(unittest.TestCase):
         self.input_file = os.path.join(self.raw_folder, 'toSequence.txt')
         self.ledger_path = os.path.join(self.data_folder, 'processed_ledger.json')
         self.json_output = os.path.join(self.output_folder, 'toSequence_parsed.json')
+        self.csv_output = os.path.join(self.output_folder, 'toSequence_parsed.csv')
 
         # Backup existing data if any
         self.backup_folder = os.path.join(self.project_root, 'data_backup')
@@ -89,8 +90,6 @@ class TestIdempotency(unittest.TestCase):
         self.assertIn(dna2, dnas)
 
     def test_retry_after_transient_failure(self):
-        # We'll simulate a transient failure by corrupting the output after a successful process
-        # and then re-running.
         dna = "VOL08900750712"
 
         with open(self.input_file, 'w') as f:
@@ -102,13 +101,7 @@ class TestIdempotency(unittest.TestCase):
             ledger = json.load(f)
         self.assertIn(dna, ledger)
 
-        # Simulate a crash where the output file was lost but ledger remained (or vice-versa)
-        # If output file is lost, next run should NOT re-process if it's in the ledger.
-        # WAIT: The requirement is "retry after transient failure → eventual consistency without corruption".
-        # If the output file is cumulative and we lose it, but keep the ledger, we might miss the data.
-        # But idempotency usually means "don't do it again if you already did it".
-
-        # Let's test if it handles corrupted output file gracefully.
+        # Corrupt output file
         with open(self.json_output, 'w') as f:
             f.write("CORRUPTED")
 
@@ -116,15 +109,52 @@ class TestIdempotency(unittest.TestCase):
         with open(self.input_file, 'w') as f:
             f.write(new_dna + "\n")
 
-        run_batch() # This should load the corrupted file, reset it to [], and add the new_dna
+        run_batch()
 
         with open(self.json_output, 'r') as f:
             data = json.load(f)
 
-        # Since VOL08900750712 was in the ledger, it was NOT re-processed.
-        # Only VOL00000000000 is in the new output.
+        # Should load the corrupted file, reset it to [], and add the new_dna.
+        # But wait, our current logic RESET it on parse error during LOAD.
+        # So it should only have the new_dna.
         self.assertEqual(len(data), 1)
         self.assertEqual(data[0]['dna'], new_dna)
+
+    def test_robustness_on_parse_error(self):
+        # DNA that will trigger RuleParseError (invalid prefix or format)
+        bad_dna = "INVALID_DNA"
+        good_dna = "VOL08900750712"
+
+        with open(self.input_file, 'w') as f:
+            f.write(f"{bad_dna}\n{good_dna}\n")
+
+        run_batch()
+
+        # Verify ledger has both
+        with open(self.ledger_path, 'r') as f:
+            ledger = json.load(f)
+        self.assertIn(bad_dna, ledger)
+        self.assertIn(good_dna, ledger)
+        self.assertTrue(ledger[bad_dna]['terminal_outcome'].startswith('error:'))
+        self.assertEqual(ledger[good_dna]['terminal_outcome'], 'success')
+
+        # Verify JSON has both
+        with open(self.json_output, 'r') as f:
+            data = json.load(f)
+        self.assertEqual(len(data), 2)
+        dnas = [entry['dna'] for entry in data]
+        self.assertIn(bad_dna, dnas)
+        self.assertIn(good_dna, dnas)
+
+        # Verify CSV has both
+        import csv
+        with open(self.csv_output, 'r', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            rows = list(reader)
+        self.assertEqual(len(rows), 2)
+        row_dnas = [r['dna'] for r in rows]
+        self.assertIn(bad_dna, row_dnas)
+        self.assertIn(good_dna, row_dnas)
 
 if __name__ == '__main__':
     unittest.main()
