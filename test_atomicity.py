@@ -100,6 +100,10 @@ class TestAtomicity(unittest.TestCase):
             del sys.modules['main']
         import main
 
+        # Ensure main.py uses our test paths
+        script_dir = self.test_dir
+        input_file = os.path.join(script_dir, 'data', 'raw', 'toSequence.txt')
+
         # We'll mock run_batch to fail
         with patch('main.run_batch', side_effect=PersistenceError("Failed")):
             with patch('main.clear_input_file') as mock_clear:
@@ -109,7 +113,7 @@ class TestAtomicity(unittest.TestCase):
                 mock_clear.assert_not_called()
 
         # Verify file still has content
-        with open(self.input_file, 'r') as f:
+        with open(input_file, 'r') as f:
             self.assertEqual(f.read().strip(), "V100")
 
 if __name__ == '__main__':

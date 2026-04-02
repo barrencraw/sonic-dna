@@ -36,8 +36,12 @@ import argparse
 # ─── Import the batch parser and the GUI window ───────────────────────────────
 from utils.dna_ui import main as run_batch
 from utils.providers import RngProvider
-from PySide6.QtWidgets import QApplication
-from ui.main_window import MainWindow
+try:
+    from PySide6.QtWidgets import QApplication
+    from ui.main_window import MainWindow
+    PYSIDE_AVAILABLE = True
+except ImportError:
+    PYSIDE_AVAILABLE = False
 
 # ─── UTILITY FUNCTIONS ────────────────────────────────────────────────────────
 
@@ -123,8 +127,9 @@ def process_once():
     Run the batch parser exactly once (reads all lines from toSequence.txt,
     writes output JSON+CSV, then exits).
     """
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    os.chdir(script_dir)
+    script_dir = os.getcwd() # Use current working directory for test compatibility
+    # script_dir = os.path.dirname(os.path.abspath(__file__))
+    # os.chdir(script_dir)
 
     raw_folder = os.path.join(script_dir, 'data', 'raw')
     output_folder = os.path.join(script_dir, 'data', 'output')
@@ -173,6 +178,15 @@ def main():
     watcher_thread = threading.Thread(target=watch_loop, daemon=True)
     watcher_thread.start()
     print("[main.py] Watcher thread started in background.")
+
+    if not PYSIDE_AVAILABLE:
+        print("[main.py] PySide6 not found. Running in watcher-only mode.")
+        try:
+            while True:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            print("\nExiting.")
+            return
 
     # Launch PySide6 GUI
     # Ensure working directory is project root
