@@ -1,32 +1,7 @@
 {
-  "variable": "Volume",
-  "prefix": "VOL",
-  "subvars": {
-    "amp": {
-      "min": 0,
-      "max": 1000,
-      "pad": 4,
-      "description": "Absolute amplitude, 0\u2013100\u202f% \u00d710 (0.1\u202f% resolution). Zero\u2011padded to 4 digits (e.g. 0890 =\u202f89.0\u202f%)."
-    },
-    "lr": {
-      "min": 0,
-      "max": 100,
-      "pad": 3,
-      "description": "Left\u2011channel dominance, 0\u2013100 (right =\u202f100\u2013L). Zero\u2011padded to 3 digits (e.g.\u202f075)."
-    },
-    "sur": {
-      "min": 0,
-      "max": 10,
-      "pad": 2,
-      "description": "Surround depth; 00\u202f=\u202fmono, 10\u202f=\u202ffull\u202f7.1. Two digits (e.g.\u202f07)."
-    },
-    "head": {
-      "min": 0,
-      "max": 60,
-      "pad": 2,
-      "description": "Headroom before limiting in dB, 0\u201360. Two digits (e.g.\u202f12\u202f=\u202f12\u202fdB)."
+    "variable": "Volume",
+    "prefix": "V",
+    "subvars": {
+        "level": {"description": "volume level", "min": 0, "max": 999, "pad": 3}
     }
-  },
-  "structure": "VOL08900750712",
-  "description": "Prefix (VOL) + amp (4) + LR (3) + surround (2) + headroom (2); all zero\u2011padded, no subvar prefixes."
 }
