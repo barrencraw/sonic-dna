@@ -36,13 +36,11 @@ class TestIdempotency(unittest.TestCase):
         if os.path.exists(self.data_folder):
             shutil.rmtree(self.data_folder)
         if os.path.exists(self.backup_folder):
-            # Check if backup exists before moving
-            if os.path.exists(self.backup_folder):
-                shutil.move(self.backup_folder, self.data_folder)
+            shutil.move(self.backup_folder, self.data_folder)
 
     def test_double_invocation_same_key(self):
-        # DNA for Volume (prefix 'VOL')
-        dna = "VOL08900750712"
+        # DNA for Volume (prefix 'V')
+        dna = "V100"
 
         # 1. First invocation
         with open(self.input_file, 'w') as f:
@@ -72,8 +70,8 @@ class TestIdempotency(unittest.TestCase):
         self.assertEqual(len(data), 1, "Should NOT have added a second entry for the same DNA")
 
     def test_mixed_duplicates(self):
-        dna1 = "VOL08900750712"
-        dna2 = "VOL00000000000"
+        dna1 = "V100"
+        dna2 = "V200"
 
         with open(self.input_file, 'w') as f:
             f.write(f"{dna1}\n{dna1}\n{dna2}\n")
@@ -91,7 +89,7 @@ class TestIdempotency(unittest.TestCase):
     def test_retry_after_transient_failure(self):
         # We'll simulate a transient failure by corrupting the output after a successful process
         # and then re-running.
-        dna = "VOL08900750712"
+        dna = "V100"
 
         with open(self.input_file, 'w') as f:
             f.write(dna + "\n")
@@ -102,17 +100,11 @@ class TestIdempotency(unittest.TestCase):
             ledger = json.load(f)
         self.assertIn(dna, ledger)
 
-        # Simulate a crash where the output file was lost but ledger remained (or vice-versa)
-        # If output file is lost, next run should NOT re-process if it's in the ledger.
-        # WAIT: The requirement is "retry after transient failure → eventual consistency without corruption".
-        # If the output file is cumulative and we lose it, but keep the ledger, we might miss the data.
-        # But idempotency usually means "don't do it again if you already did it".
-
         # Let's test if it handles corrupted output file gracefully.
         with open(self.json_output, 'w') as f:
             f.write("CORRUPTED")
 
-        new_dna = "VOL00000000000"
+        new_dna = "V200"
         with open(self.input_file, 'w') as f:
             f.write(new_dna + "\n")
 
@@ -121,8 +113,8 @@ class TestIdempotency(unittest.TestCase):
         with open(self.json_output, 'r') as f:
             data = json.load(f)
 
-        # Since VOL08900750712 was in the ledger, it was NOT re-processed.
-        # Only VOL00000000000 is in the new output.
+        # Since V100 was in the ledger, it was NOT re-processed.
+        # Only V200 is in the new output.
         self.assertEqual(len(data), 1)
         self.assertEqual(data[0]['dna'], new_dna)
 
