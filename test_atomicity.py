@@ -2,14 +2,32 @@ import sys
 from unittest.mock import MagicMock
 
 # Mock dependencies before any imports
-mock_pyside6 = MagicMock()
-sys.modules["PySide6"] = mock_pyside6
-sys.modules["PySide6.QtWidgets"] = mock_pyside6
-sys.modules["PySide6.QtCore"] = mock_pyside6
-sys.modules["PySide6.QtGui"] = mock_pyside6
+try:
+    from PySide6.QtWidgets import QApplication
+except ImportError:
+    mock_pyside6 = MagicMock()
+    sys.modules["PySide6"] = mock_pyside6
+    sys.modules["PySide6.QtWidgets"] = mock_pyside6
+    sys.modules["PySide6.QtCore"] = mock_pyside6
+    sys.modules["PySide6.QtGui"] = mock_pyside6
+
 sys.modules["torch"] = MagicMock()
 sys.modules["torchaudio"] = MagicMock()
 sys.modules["sounddevice"] = MagicMock()
+
+# Mock numpy and scipy if not available
+try:
+    import numpy as np
+except ImportError:
+    mock_np = MagicMock()
+    sys.modules["numpy"] = mock_np
+    try:
+        import scipy
+    except ImportError:
+        mock_scipy = MagicMock()
+        sys.modules["scipy"] = mock_scipy
+        sys.modules["scipy.io"] = mock_scipy
+        sys.modules["scipy.io.wavfile"] = mock_scipy
 
 import unittest
 import os
@@ -60,26 +78,36 @@ class TestAtomicity(unittest.TestCase):
 
         json_out = os.path.join(self.output_dir, 'toSequence_parsed.json')
         csv_out = os.path.join(self.output_dir, 'toSequence_parsed.csv')
+        ledger_out = os.path.join(self.data_dir, 'processed_ledger.json')
 
         self.assertTrue(os.path.exists(json_out))
         self.assertTrue(os.path.exists(csv_out))
+        self.assertTrue(os.path.exists(ledger_out))
 
         with open(json_out, 'r') as f:
             data = json.load(f)
             self.assertEqual(len(data), 1)
             self.assertEqual(data[0]['dna'], 'V100')
 
+        with open(ledger_out, 'r') as f:
+            ledger = json.load(f)
+            self.assertIn('V100', ledger)
+            self.assertEqual(ledger['V100']['terminal_outcome'], 'success')
+
     def test_crash_during_json_write(self):
-        """Simulate a crash during JSON writing. No output files should be created."""
+        """Simulate a crash during JSON writing. No output files should be created, including ledger."""
+        # Use a more specific patch to ensure it fails where we want
         with patch('json.dump', side_effect=IOError("Disk Full")):
             with self.assertRaises(PersistenceError):
                 run_batch()
 
         json_out = os.path.join(self.output_dir, 'toSequence_parsed.json')
         csv_out = os.path.join(self.output_dir, 'toSequence_parsed.csv')
+        ledger_out = os.path.join(self.data_dir, 'processed_ledger.json')
 
         self.assertFalse(os.path.exists(json_out))
         self.assertFalse(os.path.exists(csv_out))
+        self.assertFalse(os.path.exists(ledger_out))
 
     def test_crash_during_rename(self):
         """Simulate a crash/failure during the atomic rename. No output files should be created/updated."""
@@ -89,9 +117,11 @@ class TestAtomicity(unittest.TestCase):
 
         json_out = os.path.join(self.output_dir, 'toSequence_parsed.json')
         csv_out = os.path.join(self.output_dir, 'toSequence_parsed.csv')
+        ledger_out = os.path.join(self.data_dir, 'processed_ledger.json')
 
         self.assertFalse(os.path.exists(json_out))
         self.assertFalse(os.path.exists(csv_out))
+        self.assertFalse(os.path.exists(ledger_out))
 
     def test_watcher_behavior_on_failure(self):
         """Test main.py's logic: if run_batch fails, input file should NOT be cleared."""
