@@ -3,8 +3,16 @@ import os
 import json
 import re
 
+from dataclasses import dataclass
+
 class RuleParseError(Exception):
     pass
+
+@dataclass
+class ParsedDNA:
+    dna: str
+    rule: str
+    values: dict
 
 class Rule:
     def __init__(self, filepath):
@@ -266,13 +274,17 @@ class DNACalculator:
     def parse(self, dna_string):
         """
         Identify which rule applies (by prefix), then parse.
-        Returns { 'rule': variable_name, 'values': nested_dict }.
+        Returns a ParsedDNA object.
         """
         # Try to match any known prefix
         for prefix, rule in self.rules.items():
             if dna_string.startswith(prefix):
-                parsed = rule.parse(dna_string)
-                return {'rule': rule.variable, 'values': parsed}
+                parsed_values = rule.parse(dna_string)
+                return ParsedDNA(
+                    dna=dna_string,
+                    rule=rule.variable,
+                    values=parsed_values
+                )
         raise RuleParseError(f"No matching rule for DNA '{dna_string}'")
 
     def serialize(self, variable_name, values_dict):
