@@ -100,13 +100,22 @@ class TestAtomicity(unittest.TestCase):
             del sys.modules['main']
         import main
 
-        # We'll mock run_batch to fail
+        # Mocking the functions within the main module
         with patch('main.run_batch', side_effect=PersistenceError("Failed")):
             with patch('main.clear_input_file') as mock_clear:
-                with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
-                    main.process_once()
+                # Need to mock get_base_dir or similar if it were used,
+                # but main.py uses os.path.dirname(os.path.abspath(__file__))
+                # Let's try to patch it more surgically by patching the module's path handling
+                # or just ensuring we are in the right directory (which setUp does)
 
-                mock_clear.assert_not_called()
+                # We need to make sure main.py uses our test_dir paths.
+                # In main.py: script_dir = os.path.dirname(os.path.abspath(__file__))
+                # We can mock os.path.abspath to return something under our test_dir
+                with patch('os.path.abspath', side_effect=lambda x: os.path.join(self.test_dir, x) if not os.path.isabs(x) else x):
+                     with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
+                        main.process_once()
+
+                     mock_clear.assert_not_called()
 
         # Verify file still has content
         with open(self.input_file, 'r') as f:
