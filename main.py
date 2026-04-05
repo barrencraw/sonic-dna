@@ -33,11 +33,9 @@ import time
 import threading
 import argparse
 
-# ─── Import the batch parser and the GUI window ───────────────────────────────
+# ─── Import the batch parser ──────────────────────────────────────────────────
 from utils.dna_ui import main as run_batch
 from utils.providers import RngProvider
-from PySide6.QtWidgets import QApplication
-from ui.main_window import MainWindow
 
 # ─── UTILITY FUNCTIONS ────────────────────────────────────────────────────────
 
@@ -168,6 +166,14 @@ def main():
         # Run batch a single time, then exit
         process_once()
         return
+
+    # Defer PySide6 imports until we're sure we need the GUI
+    try:
+        from PySide6.QtWidgets import QApplication
+        from ui.main_window import MainWindow
+    except ImportError:
+        print("[ERROR] PySide6 not found. Please install PySide6 or use --once for CLI mode.")
+        sys.exit(1)
 
     # Otherwise: start watcher, then launch GUI
     watcher_thread = threading.Thread(target=watch_loop, daemon=True)
