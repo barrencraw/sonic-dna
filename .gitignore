@@ -9,6 +9,7 @@ __pycache__/
 
 # Data/model files
 data/
+!data/system_messages.json
 
 # OS files
 .DS_Store
