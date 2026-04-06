@@ -34,7 +34,7 @@ import threading
 import argparse
 
 # ─── Import the batch parser and the GUI window ───────────────────────────────
-from utils.dna_ui import main as run_batch
+from utils.dna_ui import main as run_batch, DNAProcessingError
 from utils.providers import RngProvider
 from PySide6.QtWidgets import QApplication
 from ui.main_window import MainWindow
@@ -94,14 +94,11 @@ def watch_loop():
                     # Only clear the input file if run_batch() succeeds
                     clear_input_file(input_file)
                     print(f"[{timestamp}] Parsing complete. Cleared toSequence.txt.\n")
+                except DNAProcessingError as e:
+                    print(f"[{timestamp}][Watcher][CRITICAL] DNA processing failed: {e}")
+                    # In case of error, we DO NOT clear the input file
                 except Exception as e:
-                    # Classify errors
-                    from utils.dna_ui import DNAProcessingError
-                    if isinstance(e, DNAProcessingError):
-                        print(f"[{timestamp}][Watcher][CRITICAL] DNA processing failed: {e}")
-                    else:
-                        print(f"[{timestamp}][Watcher][ERROR] Unexpected error: {e}")
-                    # In case of error, we DO NOT clear the input file so we can retry or investigate
+                    print(f"[{timestamp}][Watcher][ERROR] Unexpected error: {e}")
 
                 # Reset last_content so we’ll catch the next chunk of DNA
                 last_content = ""
@@ -139,13 +136,14 @@ def process_once():
     print("[Once‐Runner] Processing all DNA strings once…")
     try:
         run_batch()
+        # In --once mode, we also clear the file on success for consistency
+        clear_input_file(input_file)
         print("[Once‐Runner] Done.")
+    except DNAProcessingError as e:
+        print(f"[Once‐Runner][CRITICAL] DNA processing failed: {e}")
+        sys.exit(1)
     except Exception as e:
-        from utils.dna_ui import DNAProcessingError
-        if isinstance(e, DNAProcessingError):
-            print(f"[Once‐Runner][CRITICAL] DNA processing failed: {e}")
-        else:
-            print(f"[Once‐Runner][ERROR] Unexpected error: {e}")
+        print(f"[Once‐Runner][ERROR] Unexpected error: {e}")
         sys.exit(1)
 
 # ─── MAIN ENTRYPOINT ───────────────────────────────────────────────────────────
