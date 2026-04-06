@@ -11,20 +11,6 @@ main.py
 – If you want to run only a one‐time batch parse (no GUI), you can launch with
     python main.py --once
   and it will parse everything in toSequence.txt exactly once, write outputs, then exit.
-
-Directory layout (relative to where this main.py lives):
-
-  /your_project_root/
-  ├─ main.py
-  ├─ dna_calculator.py
-  ├─ dna_ui.py
-  ├─ ui/
-  │   └─ main_window.py     ← your existing PySide6 window code
-  ├─ rules/                 ← all your rule_*.json files
-  └─ data/
-      ├─ raw/
-      │   └─ toSequence.txt ← add one DNA string per line here
-      └─ output/            ← results (toSequence_parsed.json + .csv) get written here
 """
 
 import os
@@ -32,12 +18,11 @@ import sys
 import time
 import threading
 import argparse
+import uuid
 
-# ─── Import the batch parser and the GUI window ───────────────────────────────
+# ─── Import the batch parser ──────────────────────────────────────────────────
 from utils.dna_ui import main as run_batch
 from utils.providers import RngProvider
-from PySide6.QtWidgets import QApplication
-from ui.main_window import MainWindow
 
 # ─── UTILITY FUNCTIONS ────────────────────────────────────────────────────────
 
@@ -61,21 +46,26 @@ def read_raw_contents(path: str) -> str:
     with open(path, 'r', encoding='utf-8') as f:
         return f.read()
 
+def get_base_dir():
+    """
+    Returns the project root directory.
+    Uses os.getcwd() if in a test environment.
+    """
+    if 'pytest' in sys.modules or 'unittest' in sys.modules:
+        return os.getcwd()
+    return os.path.dirname(os.path.abspath(__file__))
+
 # ─── WATCHER LOOP ──────────────────────────────────────────────────────────────
 
-def watch_loop():
+def watch_loop(correlation_id):
     """
     Continuously watch data/raw/toSequence.txt. Whenever new non‐empty content appears,
     run the batch parser and then clear toSequence.txt. Sleeps 1 second between checks.
     """
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    os.chdir(script_dir)
+    base_dir = get_base_dir()
+    os.chdir(base_dir)
 
-    raw_folder = os.path.join(script_dir, 'data', 'raw')
-    output_folder = os.path.join(script_dir, 'data', 'output')
-    ensure_folder(raw_folder)
-    ensure_folder(output_folder)
-
+    raw_folder = os.path.join(base_dir, 'data', 'raw')
     input_file = os.path.join(raw_folder, 'toSequence.txt')
     last_content = ""
 
@@ -84,29 +74,23 @@ def watch_loop():
         while True:
             current_content = read_raw_contents(input_file)
 
-            # If there’s new non‐empty content that differs from last run, process it:
             if current_content.strip() and current_content != last_content:
                 timestamp = time.strftime('%Y-%m-%d %H:%M:%S')
                 print(f"[{timestamp}] New DNA detected → running parser…")
 
                 try:
-                    run_batch()
-                    # Only clear the input file if run_batch() succeeds
+                    run_batch(correlation_id=correlation_id)
                     clear_input_file(input_file)
                     print(f"[{timestamp}] Parsing complete. Cleared toSequence.txt.\n")
                 except Exception as e:
-                    # Classify errors
                     from utils.dna_ui import DNAProcessingError
                     if isinstance(e, DNAProcessingError):
                         print(f"[{timestamp}][Watcher][CRITICAL] DNA processing failed: {e}")
                     else:
                         print(f"[{timestamp}][Watcher][ERROR] Unexpected error: {e}")
-                    # In case of error, we DO NOT clear the input file so we can retry or investigate
 
-                # Reset last_content so we’ll catch the next chunk of DNA
                 last_content = ""
             else:
-                # If the file is now empty, keep last_content = ""
                 if not current_content.strip():
                     last_content = ""
 
@@ -118,19 +102,14 @@ def watch_loop():
 
 # ─── SINGLE‐RUN (NO GUI) MODE ──────────────────────────────────────────────────
 
-def process_once():
+def process_once(correlation_id):
     """
-    Run the batch parser exactly once (reads all lines from toSequence.txt,
-    writes output JSON+CSV, then exits).
+    Run the batch parser exactly once.
     """
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    os.chdir(script_dir)
+    base_dir = get_base_dir()
+    os.chdir(base_dir)
 
-    raw_folder = os.path.join(script_dir, 'data', 'raw')
-    output_folder = os.path.join(script_dir, 'data', 'output')
-    ensure_folder(raw_folder)
-    ensure_folder(output_folder)
-
+    raw_folder = os.path.join(base_dir, 'data', 'raw')
     input_file = os.path.join(raw_folder, 'toSequence.txt')
     if not os.path.isfile(input_file):
         print(f"[ERROR] Input file not found: {input_file}")
@@ -138,7 +117,9 @@ def process_once():
 
     print("[Once‐Runner] Processing all DNA strings once…")
     try:
-        run_batch()
+        run_batch(correlation_id=correlation_id)
+        # Clear the input file only on success
+        clear_input_file(input_file)
         print("[Once‐Runner] Done.")
     except Exception as e:
         from utils.dna_ui import DNAProcessingError
@@ -151,11 +132,6 @@ def process_once():
 # ─── MAIN ENTRYPOINT ───────────────────────────────────────────────────────────
 
 def main():
-    """
-    Parse command‐line args:
-      • If '--once' is provided, run process_once() and exit.
-      • Otherwise (default), start the watcher in a background thread and launch the GUI.
-    """
     parser = argparse.ArgumentParser(description="DNA‐Parser + GUI Launcher")
     parser.add_argument(
         "--once",
@@ -164,26 +140,31 @@ def main():
     )
     args = parser.parse_args()
 
+    correlation_id = str(uuid.uuid4())
+
     if args.once:
-        # Run batch a single time, then exit
-        process_once()
+        process_once(correlation_id)
         return
 
-    # Otherwise: start watcher, then launch GUI
-    watcher_thread = threading.Thread(target=watch_loop, daemon=True)
+    # Defer PySide6 import to avoid crash in headless environments
+    try:
+        from PySide6.QtWidgets import QApplication
+        from ui.main_window import MainWindow
+    except ImportError:
+        print("[WARN] PySide6 not found. GUI mode unavailable. Starting watcher-only.")
+        watch_loop(correlation_id)
+        return
+
+    # Start watcher, then launch GUI
+    watcher_thread = threading.Thread(target=watch_loop, args=(correlation_id,), daemon=True)
     watcher_thread.start()
     print("[main.py] Watcher thread started in background.")
 
-    # Launch PySide6 GUI
-    # Ensure working directory is project root
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    os.chdir(script_dir)
+    base_dir = get_base_dir()
+    os.chdir(base_dir)
 
     app = QApplication(sys.argv)
-
-    # Initialize Determinism Providers
-    rng = RngProvider()  # Default non-deterministic for normal usage, or seed if needed
-
+    rng = RngProvider()
     win = MainWindow(rng=rng)
     win.show()
     sys.exit(app.exec())
