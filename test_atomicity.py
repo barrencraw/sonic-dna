@@ -1,22 +1,29 @@
 import sys
+import unittest
 from unittest.mock import MagicMock
 
+# Create a robust mock for numpy and scipy
+mock_np = MagicMock()
+mock_np.random.default_rng.return_value = MagicMock()
+
 # Mock dependencies before any imports
-mock_pyside6 = MagicMock()
-sys.modules["PySide6"] = mock_pyside6
-sys.modules["PySide6.QtWidgets"] = mock_pyside6
-sys.modules["PySide6.QtCore"] = mock_pyside6
-sys.modules["PySide6.QtGui"] = mock_pyside6
+sys.modules["PySide6"] = MagicMock()
+sys.modules["PySide6.QtWidgets"] = MagicMock()
+sys.modules["PySide6.QtCore"] = MagicMock()
+sys.modules["PySide6.QtGui"] = MagicMock()
 sys.modules["torch"] = MagicMock()
 sys.modules["torchaudio"] = MagicMock()
 sys.modules["sounddevice"] = MagicMock()
+sys.modules["numpy"] = mock_np
+sys.modules["scipy"] = MagicMock()
+sys.modules["scipy.io"] = MagicMock()
+sys.modules["scipy.io.wavfile"] = MagicMock()
 
-import unittest
 import os
 import shutil
 import tempfile
 import json
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 from utils.dna_ui import main as run_batch, PersistenceError, DNAProcessingError
 
 class TestAtomicity(unittest.TestCase):
@@ -98,15 +105,22 @@ class TestAtomicity(unittest.TestCase):
         # Force import after mocks
         if 'main' in sys.modules:
             del sys.modules['main']
-        import main
 
-        # We'll mock run_batch to fail
-        with patch('main.run_batch', side_effect=PersistenceError("Failed")):
-            with patch('main.clear_input_file') as mock_clear:
-                with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
-                    main.process_once()
+        # We need to ensure main.py's process_once finds the file in OUR test_dir
+        # but main.py uses os.path.dirname(os.path.abspath(__file__))
+        # which will be the REAL main.py location.
+        # We'll mock os.path.abspath and os.path.dirname inside main.py
 
-                mock_clear.assert_not_called()
+        with patch('os.path.abspath', return_value=os.path.join(self.test_dir, 'main.py')):
+            with patch('os.path.dirname', return_value=self.test_dir):
+                import main
+                # We'll mock run_batch to fail
+                with patch('main.run_batch', side_effect=PersistenceError("Failed")):
+                    with patch('main.clear_input_file') as mock_clear:
+                        with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
+                            main.process_once()
+
+                        mock_clear.assert_not_called()
 
         # Verify file still has content
         with open(self.input_file, 'r') as f:
