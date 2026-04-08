@@ -15,6 +15,7 @@ class TestIdempotency(unittest.TestCase):
         self.input_file = os.path.join(self.raw_folder, 'toSequence.txt')
         self.ledger_path = os.path.join(self.data_folder, 'processed_ledger.json')
         self.json_output = os.path.join(self.output_folder, 'toSequence_parsed.json')
+        self.integrity_path = os.path.join(self.data_folder, 'system_integrity.json')
 
         # Backup existing data if any
         self.backup_folder = os.path.join(self.project_root, 'data_backup')
@@ -102,12 +103,6 @@ class TestIdempotency(unittest.TestCase):
             ledger = json.load(f)
         self.assertIn(dna, ledger)
 
-        # Simulate a crash where the output file was lost but ledger remained (or vice-versa)
-        # If output file is lost, next run should NOT re-process if it's in the ledger.
-        # WAIT: The requirement is "retry after transient failure → eventual consistency without corruption".
-        # If the output file is cumulative and we lose it, but keep the ledger, we might miss the data.
-        # But idempotency usually means "don't do it again if you already did it".
-
         # Let's test if it handles corrupted output file gracefully.
         with open(self.json_output, 'w') as f:
             f.write("CORRUPTED")
@@ -125,6 +120,33 @@ class TestIdempotency(unittest.TestCase):
         # Only VOL00000000000 is in the new output.
         self.assertEqual(len(data), 1)
         self.assertEqual(data[0]['dna'], new_dna)
+
+    def test_integrity_idempotency(self):
+        dna = "VOL08900750712"
+
+        # 1. First invocation
+        with open(self.input_file, 'w') as f:
+            f.write(dna + "\n")
+
+        run_batch()
+
+        with open(self.integrity_path, 'r') as f:
+            integrity_data = json.load(f)
+
+        integrity_after_1 = integrity_data['integrity']
+        self.assertEqual(integrity_after_1, 98, "Integrity should decrease by 2 after first process")
+
+        # 2. Second invocation
+        with open(self.input_file, 'w') as f:
+            f.write(dna + "\n")
+
+        run_batch()
+
+        with open(self.integrity_path, 'r') as f:
+            integrity_data = json.load(f)
+
+        integrity_after_2 = integrity_data['integrity']
+        self.assertEqual(integrity_after_2, integrity_after_1, "Integrity should NOT decrease on duplicate DNA")
 
 if __name__ == '__main__':
     unittest.main()
