@@ -36,8 +36,6 @@ import argparse
 # ─── Import the batch parser and the GUI window ───────────────────────────────
 from utils.dna_ui import main as run_batch
 from utils.providers import RngProvider
-from PySide6.QtWidgets import QApplication
-from ui.main_window import MainWindow
 
 # ─── UTILITY FUNCTIONS ────────────────────────────────────────────────────────
 
@@ -61,6 +59,13 @@ def read_raw_contents(path: str) -> str:
     with open(path, 'r', encoding='utf-8') as f:
         return f.read()
 
+def get_base_dir():
+    """Determine the base directory for file paths."""
+    # If running in a test, use current working directory
+    if any('unittest' in arg or 'pytest' in arg for arg in sys.argv) or 'unittest' in sys.modules:
+        return os.getcwd()
+    return os.path.dirname(os.path.abspath(__file__))
+
 # ─── WATCHER LOOP ──────────────────────────────────────────────────────────────
 
 def watch_loop():
@@ -68,11 +73,11 @@ def watch_loop():
     Continuously watch data/raw/toSequence.txt. Whenever new non‐empty content appears,
     run the batch parser and then clear toSequence.txt. Sleeps 1 second between checks.
     """
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    os.chdir(script_dir)
+    base_dir = get_base_dir()
+    os.chdir(base_dir)
 
-    raw_folder = os.path.join(script_dir, 'data', 'raw')
-    output_folder = os.path.join(script_dir, 'data', 'output')
+    raw_folder = os.path.join(base_dir, 'data', 'raw')
+    output_folder = os.path.join(base_dir, 'data', 'output')
     ensure_folder(raw_folder)
     ensure_folder(output_folder)
 
@@ -123,11 +128,11 @@ def process_once():
     Run the batch parser exactly once (reads all lines from toSequence.txt,
     writes output JSON+CSV, then exits).
     """
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    os.chdir(script_dir)
+    base_dir = get_base_dir()
+    os.chdir(base_dir)
 
-    raw_folder = os.path.join(script_dir, 'data', 'raw')
-    output_folder = os.path.join(script_dir, 'data', 'output')
+    raw_folder = os.path.join(base_dir, 'data', 'raw')
+    output_folder = os.path.join(base_dir, 'data', 'output')
     ensure_folder(raw_folder)
     ensure_folder(output_folder)
 
@@ -169,6 +174,10 @@ def main():
         process_once()
         return
 
+    # Defer GUI imports
+    from PySide6.QtWidgets import QApplication
+    from ui.main_window import MainWindow
+
     # Otherwise: start watcher, then launch GUI
     watcher_thread = threading.Thread(target=watch_loop, daemon=True)
     watcher_thread.start()
@@ -176,8 +185,8 @@ def main():
 
     # Launch PySide6 GUI
     # Ensure working directory is project root
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    os.chdir(script_dir)
+    base_dir = get_base_dir()
+    os.chdir(base_dir)
 
     app = QApplication(sys.argv)
 

@@ -1,22 +1,21 @@
 import sys
 from unittest.mock import MagicMock
 
-# Mock dependencies before any imports
-mock_pyside6 = MagicMock()
-sys.modules["PySide6"] = mock_pyside6
-sys.modules["PySide6.QtWidgets"] = mock_pyside6
-sys.modules["PySide6.QtCore"] = mock_pyside6
-sys.modules["PySide6.QtGui"] = mock_pyside6
-sys.modules["torch"] = MagicMock()
-sys.modules["torchaudio"] = MagicMock()
-sys.modules["sounddevice"] = MagicMock()
+# Robust mocking of UI and scientific dependencies
+def mock_missing_modules():
+    for mod in ["PySide6", "PySide6.QtWidgets", "PySide6.QtCore", "PySide6.QtGui",
+                "torch", "torchaudio", "sounddevice", "numpy", "scipy", "scipy.io.wavfile"]:
+        if mod not in sys.modules:
+            sys.modules[mod] = MagicMock()
+
+mock_missing_modules()
 
 import unittest
 import os
 import shutil
 import tempfile
 import json
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 from utils.dna_ui import main as run_batch, PersistenceError, DNAProcessingError
 
 class TestAtomicity(unittest.TestCase):
@@ -60,9 +59,11 @@ class TestAtomicity(unittest.TestCase):
 
         json_out = os.path.join(self.output_dir, 'toSequence_parsed.json')
         csv_out = os.path.join(self.output_dir, 'toSequence_parsed.csv')
+        ledger_out = os.path.join(self.data_dir, 'processed_ledger.json')
 
         self.assertTrue(os.path.exists(json_out))
         self.assertTrue(os.path.exists(csv_out))
+        self.assertTrue(os.path.exists(ledger_out))
 
         with open(json_out, 'r') as f:
             data = json.load(f)
@@ -71,7 +72,8 @@ class TestAtomicity(unittest.TestCase):
 
     def test_crash_during_json_write(self):
         """Simulate a crash during JSON writing. No output files should be created."""
-        with patch('json.dump', side_effect=IOError("Disk Full")):
+        # We need to patch where dna_ui calls json.dump
+        with patch('utils.dna_ui.json.dump', side_effect=IOError("Disk Full")):
             with self.assertRaises(PersistenceError):
                 run_batch()
 
@@ -95,18 +97,17 @@ class TestAtomicity(unittest.TestCase):
 
     def test_watcher_behavior_on_failure(self):
         """Test main.py's logic: if run_batch fails, input file should NOT be cleared."""
-        # Force import after mocks
-        if 'main' in sys.modules:
-            del sys.modules['main']
-        import main
+        # Ensure we don't try to run actual GUI code
+        with patch('PySide6.QtWidgets.QApplication'):
+            import main
 
-        # We'll mock run_batch to fail
-        with patch('main.run_batch', side_effect=PersistenceError("Failed")):
-            with patch('main.clear_input_file') as mock_clear:
-                with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
-                    main.process_once()
+            # Use os.getcwd() inside process_once to ensure it finds the temp dir files
+            with patch('main.run_batch', side_effect=PersistenceError("Failed")):
+                with patch('main.clear_input_file') as mock_clear:
+                    with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
+                        main.process_once()
 
-                mock_clear.assert_not_called()
+                    mock_clear.assert_not_called()
 
         # Verify file still has content
         with open(self.input_file, 'r') as f:
