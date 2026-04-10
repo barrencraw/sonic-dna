@@ -98,13 +98,27 @@ class TestAtomicity(unittest.TestCase):
         # Force import after mocks
         if 'main' in sys.modules:
             del sys.modules['main']
+
+        # Manually patch the directories in main.py after import
         import main
 
-        # We'll mock run_batch to fail
         with patch('main.run_batch', side_effect=PersistenceError("Failed")):
             with patch('main.clear_input_file') as mock_clear:
-                with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
-                    main.process_once()
+                # We need to make sure main.process_once looks at our temp input file
+                # Instead of patching os.path.join, we can patch read_raw_contents and ensure_folder etc if needed
+                # or just patch the input_file variable if it was global (it's local to process_once)
+
+                # Let's patch os.path.isfile and open to redirect to our temp files
+                original_open = open
+                def mocked_open(path, *args, **kwargs):
+                    if 'toSequence.txt' in str(path):
+                        return original_open(self.input_file, *args, **kwargs)
+                    return original_open(path, *args, **kwargs)
+
+                with patch('builtins.open', side_effect=mocked_open):
+                    with patch('os.path.isfile', side_effect=lambda p: True if 'toSequence.txt' in str(p) else os.path.isfile(p)):
+                         with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
+                            main.process_once()
 
                 mock_clear.assert_not_called()
 
