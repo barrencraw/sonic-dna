@@ -1,4 +1,10 @@
-import numpy as np
+try:
+    import numpy as np
+    HAS_NUMPY = True
+except ImportError:
+    np = None
+    HAS_NUMPY = False
+
 try:
     import sounddevice as sd
 except OSError:
