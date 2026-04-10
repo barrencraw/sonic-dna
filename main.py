@@ -36,8 +36,6 @@ import argparse
 # ─── Import the batch parser and the GUI window ───────────────────────────────
 from utils.dna_ui import main as run_batch
 from utils.providers import RngProvider
-from PySide6.QtWidgets import QApplication
-from ui.main_window import MainWindow
 
 # ─── UTILITY FUNCTIONS ────────────────────────────────────────────────────────
 
@@ -94,6 +92,8 @@ def watch_loop():
                     # Only clear the input file if run_batch() succeeds
                     clear_input_file(input_file)
                     print(f"[{timestamp}] Parsing complete. Cleared toSequence.txt.\n")
+                    # Reset last_content so we’ll catch the next chunk of DNA
+                    last_content = ""
                 except Exception as e:
                     # Classify errors
                     from utils.dna_ui import DNAProcessingError
@@ -102,9 +102,8 @@ def watch_loop():
                     else:
                         print(f"[{timestamp}][Watcher][ERROR] Unexpected error: {e}")
                     # In case of error, we DO NOT clear the input file so we can retry or investigate
-
-                # Reset last_content so we’ll catch the next chunk of DNA
-                last_content = ""
+                    # Set last_content to current so we don't spam errors if file doesn't change
+                    last_content = current_content
             else:
                 # If the file is now empty, keep last_content = ""
                 if not current_content.strip():
@@ -139,7 +138,8 @@ def process_once():
     print("[Once‐Runner] Processing all DNA strings once…")
     try:
         run_batch()
-        print("[Once‐Runner] Done.")
+        clear_input_file(input_file)
+        print("[Once‐Runner] Done. Cleared toSequence.txt.")
     except Exception as e:
         from utils.dna_ui import DNAProcessingError
         if isinstance(e, DNAProcessingError):
@@ -178,6 +178,13 @@ def main():
     # Ensure working directory is project root
     script_dir = os.path.dirname(os.path.abspath(__file__))
     os.chdir(script_dir)
+
+    try:
+        from PySide6.QtWidgets import QApplication
+        from ui.main_window import MainWindow
+    except ImportError:
+        print("[ERROR] PySide6 not found. GUI mode requires PySide6.")
+        sys.exit(1)
 
     app = QApplication(sys.argv)
 
