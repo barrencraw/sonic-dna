@@ -33,11 +33,9 @@ import time
 import threading
 import argparse
 
-# ─── Import the batch parser and the GUI window ───────────────────────────────
-from utils.dna_ui import main as run_batch
+# ─── Import the batch parser ───────────────────────────────
+from utils.dna_ui import main as run_batch, DNAProcessingError
 from utils.providers import RngProvider
-from PySide6.QtWidgets import QApplication
-from ui.main_window import MainWindow
 
 # ─── UTILITY FUNCTIONS ────────────────────────────────────────────────────────
 
@@ -96,7 +94,6 @@ def watch_loop():
                     print(f"[{timestamp}] Parsing complete. Cleared toSequence.txt.\n")
                 except Exception as e:
                     # Classify errors
-                    from utils.dna_ui import DNAProcessingError
                     if isinstance(e, DNAProcessingError):
                         print(f"[{timestamp}][Watcher][CRITICAL] DNA processing failed: {e}")
                     else:
@@ -141,7 +138,6 @@ def process_once():
         run_batch()
         print("[Once‐Runner] Done.")
     except Exception as e:
-        from utils.dna_ui import DNAProcessingError
         if isinstance(e, DNAProcessingError):
             print(f"[Once‐Runner][CRITICAL] DNA processing failed: {e}")
         else:
@@ -168,6 +164,15 @@ def main():
         # Run batch a single time, then exit
         process_once()
         return
+
+    # Defer GUI imports
+    try:
+        from PySide6.QtWidgets import QApplication
+        from ui.main_window import MainWindow
+    except ImportError:
+        print("[CRITICAL] PySide6 not found. Cannot launch GUI.")
+        print("Use --once for CLI batch processing.")
+        sys.exit(1)
 
     # Otherwise: start watcher, then launch GUI
     watcher_thread = threading.Thread(target=watch_loop, daemon=True)
