@@ -22,7 +22,7 @@ from utils.dna_ui import main as run_batch, PersistenceError, DNAProcessingError
 class TestAtomicity(unittest.TestCase):
     def setUp(self):
         # Create a temporary project structure
-        self.test_dir = tempfile.mkdtemp()
+        self.test_dir = os.path.realpath(tempfile.mkdtemp())
         self.data_dir = os.path.join(self.test_dir, 'data')
         self.raw_dir = os.path.join(self.data_dir, 'raw')
         self.output_dir = os.path.join(self.data_dir, 'output')
@@ -101,11 +101,16 @@ class TestAtomicity(unittest.TestCase):
         import main
 
         # We'll mock run_batch to fail
+        # Patch main.run_batch (which is imported from utils.dna_ui)
         with patch('main.run_batch', side_effect=PersistenceError("Failed")):
             with patch('main.clear_input_file') as mock_clear:
-                with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
-                    main.process_once()
+                # In our mocked environment, sys.exit(1) should be called
+                with patch('os.path.abspath', return_value=self.test_dir):
+                    with patch('os.path.dirname', return_value=self.test_dir):
+                        with self.assertRaises(SystemExit) as cm:
+                             main.process_once()
 
+                self.assertEqual(cm.exception.code, 1)
                 mock_clear.assert_not_called()
 
         # Verify file still has content
