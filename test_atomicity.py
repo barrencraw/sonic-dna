@@ -10,6 +10,10 @@ sys.modules["PySide6.QtGui"] = mock_pyside6
 sys.modules["torch"] = MagicMock()
 sys.modules["torchaudio"] = MagicMock()
 sys.modules["sounddevice"] = MagicMock()
+sys.modules["numpy"] = MagicMock()
+sys.modules["scipy"] = MagicMock()
+sys.modules["scipy.io"] = MagicMock()
+sys.modules["scipy.io.wavfile"] = MagicMock()
 
 import unittest
 import os
@@ -35,6 +39,8 @@ class TestAtomicity(unittest.TestCase):
         self.input_file = os.path.join(self.raw_dir, 'toSequence.txt')
         with open(self.input_file, 'w') as f:
             f.write("V100\n")
+
+        # Mock providers to avoid numpy dependency if possible, but we already mocked it in sys.modules
 
         # Mock a rule file
         self.rule_file = os.path.join(self.rules_dir, 'rules_Volume.json')
@@ -100,13 +106,18 @@ class TestAtomicity(unittest.TestCase):
             del sys.modules['main']
         import main
 
-        # We'll mock run_batch to fail
+        # Ensure raw_folder and output_folder are set correctly in the mock environment
+        # We need to mock os.path.join and os.path.isfile because process_once uses relative paths
+        # based on script_dir which is project root in tests.
+
         with patch('main.run_batch', side_effect=PersistenceError("Failed")):
             with patch('main.clear_input_file') as mock_clear:
-                with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
-                    main.process_once()
+                # We need to make sure process_once finds the input file
+                with patch('os.path.isfile', side_effect=lambda x: True if 'toSequence.txt' in x else os.path.isfile(x)):
+                    with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
+                        main.process_once()
 
-                mock_clear.assert_not_called()
+                    mock_clear.assert_not_called()
 
         # Verify file still has content
         with open(self.input_file, 'r') as f:
