@@ -11,20 +11,6 @@ main.py
 – If you want to run only a one‐time batch parse (no GUI), you can launch with
     python main.py --once
   and it will parse everything in toSequence.txt exactly once, write outputs, then exit.
-
-Directory layout (relative to where this main.py lives):
-
-  /your_project_root/
-  ├─ main.py
-  ├─ dna_calculator.py
-  ├─ dna_ui.py
-  ├─ ui/
-  │   └─ main_window.py     ← your existing PySide6 window code
-  ├─ rules/                 ← all your rule_*.json files
-  └─ data/
-      ├─ raw/
-      │   └─ toSequence.txt ← add one DNA string per line here
-      └─ output/            ← results (toSequence_parsed.json + .csv) get written here
 """
 
 import os
@@ -33,11 +19,9 @@ import time
 import threading
 import argparse
 
-# ─── Import the batch parser and the GUI window ───────────────────────────────
-from utils.dna_ui import main as run_batch
+# Defer GUI-specific imports to allow headless execution for --once
+from utils.dna_ui import main as run_batch, DNAProcessingError
 from utils.providers import RngProvider
-from PySide6.QtWidgets import QApplication
-from ui.main_window import MainWindow
 
 # ─── UTILITY FUNCTIONS ────────────────────────────────────────────────────────
 
@@ -49,12 +33,11 @@ def ensure_folder(path: str):
 def clear_input_file(path: str):
     """Truncate (empty) the file at `path`."""
     with open(path, 'w', encoding='utf-8'):
-        pass  # opening in 'w' mode clears the file
+        pass
 
 def read_raw_contents(path: str) -> str:
     """
     Return the entire contents of the file at `path` as a string.
-    If the file does not exist, returns an empty string.
     """
     if not os.path.isfile(path):
         return ""
@@ -65,16 +48,13 @@ def read_raw_contents(path: str) -> str:
 
 def watch_loop():
     """
-    Continuously watch data/raw/toSequence.txt. Whenever new non‐empty content appears,
-    run the batch parser and then clear toSequence.txt. Sleeps 1 second between checks.
+    Continuously watch data/raw/toSequence.txt.
     """
     script_dir = os.path.dirname(os.path.abspath(__file__))
     os.chdir(script_dir)
 
     raw_folder = os.path.join(script_dir, 'data', 'raw')
-    output_folder = os.path.join(script_dir, 'data', 'output')
     ensure_folder(raw_folder)
-    ensure_folder(output_folder)
 
     input_file = os.path.join(raw_folder, 'toSequence.txt')
     last_content = ""
@@ -84,29 +64,22 @@ def watch_loop():
         while True:
             current_content = read_raw_contents(input_file)
 
-            # If there’s new non‐empty content that differs from last run, process it:
             if current_content.strip() and current_content != last_content:
                 timestamp = time.strftime('%Y-%m-%d %H:%M:%S')
                 print(f"[{timestamp}] New DNA detected → running parser…")
 
                 try:
                     run_batch()
-                    # Only clear the input file if run_batch() succeeds
                     clear_input_file(input_file)
                     print(f"[{timestamp}] Parsing complete. Cleared toSequence.txt.\n")
                 except Exception as e:
-                    # Classify errors
-                    from utils.dna_ui import DNAProcessingError
                     if isinstance(e, DNAProcessingError):
                         print(f"[{timestamp}][Watcher][CRITICAL] DNA processing failed: {e}")
                     else:
                         print(f"[{timestamp}][Watcher][ERROR] Unexpected error: {e}")
-                    # In case of error, we DO NOT clear the input file so we can retry or investigate
 
-                # Reset last_content so we’ll catch the next chunk of DNA
                 last_content = ""
             else:
-                # If the file is now empty, keep last_content = ""
                 if not current_content.strip():
                     last_content = ""
 
@@ -120,16 +93,13 @@ def watch_loop():
 
 def process_once():
     """
-    Run the batch parser exactly once (reads all lines from toSequence.txt,
-    writes output JSON+CSV, then exits).
+    Run the batch parser exactly once.
     """
     script_dir = os.path.dirname(os.path.abspath(__file__))
     os.chdir(script_dir)
 
     raw_folder = os.path.join(script_dir, 'data', 'raw')
-    output_folder = os.path.join(script_dir, 'data', 'output')
     ensure_folder(raw_folder)
-    ensure_folder(output_folder)
 
     input_file = os.path.join(raw_folder, 'toSequence.txt')
     if not os.path.isfile(input_file):
@@ -139,9 +109,10 @@ def process_once():
     print("[Once‐Runner] Processing all DNA strings once…")
     try:
         run_batch()
+        # In once mode, we also clear the file on success
+        clear_input_file(input_file)
         print("[Once‐Runner] Done.")
     except Exception as e:
-        from utils.dna_ui import DNAProcessingError
         if isinstance(e, DNAProcessingError):
             print(f"[Once‐Runner][CRITICAL] DNA processing failed: {e}")
         else:
@@ -151,11 +122,6 @@ def process_once():
 # ─── MAIN ENTRYPOINT ───────────────────────────────────────────────────────────
 
 def main():
-    """
-    Parse command‐line args:
-      • If '--once' is provided, run process_once() and exit.
-      • Otherwise (default), start the watcher in a background thread and launch the GUI.
-    """
     parser = argparse.ArgumentParser(description="DNA‐Parser + GUI Launcher")
     parser.add_argument(
         "--once",
@@ -165,24 +131,27 @@ def main():
     args = parser.parse_args()
 
     if args.once:
-        # Run batch a single time, then exit
         process_once()
         return
 
-    # Otherwise: start watcher, then launch GUI
+    # Background Watcher
     watcher_thread = threading.Thread(target=watch_loop, daemon=True)
     watcher_thread.start()
     print("[main.py] Watcher thread started in background.")
 
-    # Launch PySide6 GUI
-    # Ensure working directory is project root
+    # GUI Mode: Deferred imports
+    try:
+        from PySide6.QtWidgets import QApplication
+        from ui.main_window import MainWindow
+    except ImportError:
+        print("[ERROR] PySide6 not found. GUI mode requires PySide6.")
+        sys.exit(1)
+
     script_dir = os.path.dirname(os.path.abspath(__file__))
     os.chdir(script_dir)
 
     app = QApplication(sys.argv)
-
-    # Initialize Determinism Providers
-    rng = RngProvider()  # Default non-deterministic for normal usage, or seed if needed
+    rng = RngProvider()
 
     win = MainWindow(rng=rng)
     win.show()
