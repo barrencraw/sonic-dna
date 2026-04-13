@@ -41,6 +41,15 @@ from ui.main_window import MainWindow
 
 # ─── UTILITY FUNCTIONS ────────────────────────────────────────────────────────
 
+def get_base_dir():
+    """
+    Returns the directory where data/ and rules/ should be located.
+    If running under a test runner, returns the current working directory.
+    """
+    if 'unittest' in sys.modules or 'pytest' in sys.modules:
+        return os.getcwd()
+    return os.path.dirname(os.path.abspath(__file__))
+
 def ensure_folder(path: str):
     """Create the folder if it doesn’t exist."""
     if not os.path.isdir(path):
@@ -68,11 +77,10 @@ def watch_loop():
     Continuously watch data/raw/toSequence.txt. Whenever new non‐empty content appears,
     run the batch parser and then clear toSequence.txt. Sleeps 1 second between checks.
     """
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    os.chdir(script_dir)
+    base_dir = get_base_dir()
 
-    raw_folder = os.path.join(script_dir, 'data', 'raw')
-    output_folder = os.path.join(script_dir, 'data', 'output')
+    raw_folder = os.path.join(base_dir, 'data', 'raw')
+    output_folder = os.path.join(base_dir, 'data', 'output')
     ensure_folder(raw_folder)
     ensure_folder(output_folder)
 
@@ -90,7 +98,7 @@ def watch_loop():
                 print(f"[{timestamp}] New DNA detected → running parser…")
 
                 try:
-                    run_batch()
+                    run_batch(data_dir=os.path.join(base_dir, 'data'))
                     # Only clear the input file if run_batch() succeeds
                     clear_input_file(input_file)
                     print(f"[{timestamp}] Parsing complete. Cleared toSequence.txt.\n")
@@ -123,11 +131,10 @@ def process_once():
     Run the batch parser exactly once (reads all lines from toSequence.txt,
     writes output JSON+CSV, then exits).
     """
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    os.chdir(script_dir)
+    base_dir = get_base_dir()
 
-    raw_folder = os.path.join(script_dir, 'data', 'raw')
-    output_folder = os.path.join(script_dir, 'data', 'output')
+    raw_folder = os.path.join(base_dir, 'data', 'raw')
+    output_folder = os.path.join(base_dir, 'data', 'output')
     ensure_folder(raw_folder)
     ensure_folder(output_folder)
 
@@ -138,7 +145,7 @@ def process_once():
 
     print("[Once‐Runner] Processing all DNA strings once…")
     try:
-        run_batch()
+        run_batch(data_dir=os.path.join(base_dir, 'data'))
         print("[Once‐Runner] Done.")
     except Exception as e:
         from utils.dna_ui import DNAProcessingError
