@@ -1,14 +1,48 @@
-import numpy as np
+try:
+    import numpy as np
+    HAS_NUMPY = True
+except ImportError:
+    HAS_NUMPY = False
+    np = None
+
+try:
+    import scipy.io.wavfile
+    HAS_SCIPY = True
+    write_wav = scipy.io.wavfile.write
+except ImportError:
+    HAS_SCIPY = False
+    write_wav = None
+
 try:
     import sounddevice as sd
-except OSError:
+except (OSError, ImportError):
     sd = None
-from scipy.io.wavfile import write as write_wav
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFileDialog, QComboBox
-)
-from PySide6.QtGui import QPainter, QPen, QColor
+
+try:
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import (
+        QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFileDialog, QComboBox
+    )
+    from PySide6.QtGui import QPainter, QPen, QColor
+    HAS_PYSIDE = True
+except ImportError:
+    HAS_PYSIDE = False
+    # Minimal stubs for headless environments
+    class QWidget:
+        def __init__(self, *args, **kwargs): pass
+    class QVBoxLayout:
+        def __init__(self, *args, **kwargs): pass
+    class QHBoxLayout:
+        def __init__(self, *args, **kwargs): pass
+    class QLabel:
+        def __init__(self, *args, **kwargs): pass
+    class QPushButton:
+        def __init__(self, *args, **kwargs): pass
+    class QFileDialog: pass
+    class QComboBox:
+        def __init__(self, *args, **kwargs): pass
+    class Qt:
+        black = None
 
 SAMPLE_RATE = 44100
 DURATION = 2.0
@@ -40,6 +74,8 @@ BASE_SOUNDS = [
 ]
 
 def gen_wave(wave_type, volume=0.8, rng=None):
+    if not HAS_NUMPY:
+        return None
     t = np.linspace(0, DURATION, int(SAMPLE_RATE * DURATION), endpoint=False)
 
     if rng is None:
