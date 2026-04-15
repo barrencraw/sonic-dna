@@ -34,7 +34,7 @@ import threading
 import argparse
 
 # ─── Import the batch parser and the GUI window ───────────────────────────────
-from utils.dna_ui import main as run_batch
+from utils.dna_ui import main as run_batch, log_observability, Outcome
 from utils.providers import RngProvider
 from PySide6.QtWidgets import QApplication
 from ui.main_window import MainWindow
@@ -79,28 +79,25 @@ def watch_loop():
     input_file = os.path.join(raw_folder, 'toSequence.txt')
     last_content = ""
 
-    print("[Watcher] Started. Monitoring data/raw/toSequence.txt for new DNA lines…")
+    log_observability("WATCHER_START", Outcome.START, chain_name="watcher_chain")
     try:
         while True:
             current_content = read_raw_contents(input_file)
 
             # If there’s new non‐empty content that differs from last run, process it:
             if current_content.strip() and current_content != last_content:
-                timestamp = time.strftime('%Y-%m-%d %H:%M:%S')
-                print(f"[{timestamp}] New DNA detected → running parser…")
+                log_observability("NEW_DNA_DETECTED", Outcome.PROCESSING, chain_name="watcher_chain")
 
                 try:
-                    run_batch()
+                    run_batch(data_dir=script_dir)
                     # Only clear the input file if run_batch() succeeds
                     clear_input_file(input_file)
-                    print(f"[{timestamp}] Parsing complete. Cleared toSequence.txt.\n")
+                    log_observability("WATCHER_BATCH_COMPLETE", Outcome.SUCCESS, chain_name="watcher_chain")
                 except Exception as e:
                     # Classify errors
                     from utils.dna_ui import DNAProcessingError
-                    if isinstance(e, DNAProcessingError):
-                        print(f"[{timestamp}][Watcher][CRITICAL] DNA processing failed: {e}")
-                    else:
-                        print(f"[{timestamp}][Watcher][ERROR] Unexpected error: {e}")
+                    error_type = "CRITICAL" if isinstance(e, DNAProcessingError) else "ERROR"
+                    log_observability("WATCHER_BATCH_FAIL", Outcome.ERROR, chain_name="watcher_chain", error_message=f"[{error_type}] {str(e)}")
                     # In case of error, we DO NOT clear the input file so we can retry or investigate
 
                 # Reset last_content so we’ll catch the next chunk of DNA
@@ -136,16 +133,14 @@ def process_once():
         print(f"[ERROR] Input file not found: {input_file}")
         return
 
-    print("[Once‐Runner] Processing all DNA strings once…")
+    log_observability("ONCE_RUNNER_START", Outcome.START, chain_name="once_runner_chain")
     try:
-        run_batch()
-        print("[Once‐Runner] Done.")
+        run_batch(data_dir=script_dir)
+        log_observability("ONCE_RUNNER_COMPLETE", Outcome.SUCCESS, chain_name="once_runner_chain")
     except Exception as e:
         from utils.dna_ui import DNAProcessingError
-        if isinstance(e, DNAProcessingError):
-            print(f"[Once‐Runner][CRITICAL] DNA processing failed: {e}")
-        else:
-            print(f"[Once‐Runner][ERROR] Unexpected error: {e}")
+        error_type = "CRITICAL" if isinstance(e, DNAProcessingError) else "ERROR"
+        log_observability("ONCE_RUNNER_FAIL", Outcome.ERROR, chain_name="once_runner_chain", error_message=f"[{error_type}] {str(e)}")
         sys.exit(1)
 
 # ─── MAIN ENTRYPOINT ───────────────────────────────────────────────────────────
