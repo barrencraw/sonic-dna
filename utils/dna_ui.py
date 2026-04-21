@@ -3,7 +3,37 @@ import os
 import json
 import csv
 import time
+import uuid
+import getpass
+from enum import Enum
+from datetime import datetime, timezone
 from utils.dna_calculator import DNACalculator, RuleParseError
+
+class Outcome(Enum):
+    START = "START"
+    END = "END"
+    SUCCESS = "SUCCESS"
+    ERROR = "ERROR"
+    SKIPPED = "SKIPPED"
+    PROCESSING = "PROCESSING"
+    NO_NEW_DNA = "NO_NEW_DNA"
+    PARTIAL_SUCCESS = "PARTIAL_SUCCESS"
+
+def log_observability(chain_name, step, outcome, correlation_id=None, latency_ms=0, idempotency_key=None, error_message=None):
+    """
+    Standardized structured logging for SonicDNA.
+    """
+    ts = datetime.now(timezone.utc).isoformat()
+    cid = correlation_id or str(uuid.uuid4())
+    actor = getpass.getuser()
+    msg = f" | {error_message}" if error_message else ""
+
+    log_line = (f"{ts} | {cid} | {chain_name} | {step} | {outcome.value if isinstance(outcome, Outcome) else outcome} | "
+                f"{latency_ms}ms | {actor} | {idempotency_key or 'N/A'}{msg}")
+
+    print(log_line)
+    # In a real app, we might write to a file or a logging service here.
+    return cid
 
 def ensure_folder(path):
     if not os.path.isdir(path):
@@ -50,6 +80,11 @@ class RuleLoadError(DNAProcessingError):
 class PersistenceError(DNAProcessingError):
     """Raised when writing or moving output files fails."""
     pass
+
+class ThermalOverloadError(DNAProcessingError):
+    """Raised when system heat prevents processing specific DNA."""
+    pass
+
 def load_ledger(ledger_path):
     if os.path.exists(ledger_path):
         try:
@@ -59,40 +94,59 @@ def load_ledger(ledger_path):
             return {}
     return {}
 
-def save_ledger(ledger_path, ledger):
-    with open(ledger_path, 'w', encoding='utf-8') as f:
-        json.dump(ledger, f, indent=2)
+def load_system_state(state_path):
+    if os.path.exists(state_path):
+        try:
+            with open(state_path, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception:
+            return {"system_heat": 0.0}
+    return {"system_heat": 0.0}
 
-def main():
+def main(data_dir=None):
+    start_time = time.time()
+    cid = log_observability("dna_batch_chain", "START", Outcome.START)
+
     # Determine file paths
-    project_root = os.getcwd()
+    project_root = data_dir or os.getcwd()
     raw_folder = os.path.join(project_root, 'data', 'raw')
     output_folder = os.path.join(project_root, 'data', 'output')
     ledger_path = os.path.join(project_root, 'data', 'processed_ledger.json')
+    state_path = os.path.join(project_root, 'data', 'system_state.json')
+
     ensure_folder(output_folder)
+    ensure_folder(os.path.join(project_root, 'data'))
 
     input_file = os.path.join(raw_folder, 'toSequence.txt')
     if not os.path.isfile(input_file):
-        print(f"[ERROR] Input file not found: {input_file}")
+        log_observability("dna_batch_chain", "END", Outcome.END, correlation_id=cid, error_message=f"Input file not found: {input_file}")
         return
 
     # Instantiate calculator
+    rules_path = os.path.join(project_root, 'rules')
     try:
-        calculator = DNACalculator(rules_folder=os.path.join(project_root, 'rules'))
+        calculator = DNACalculator(rules_folder=rules_path)
     except Exception as e:
-        raise RuleLoadError(f"Could not load rules from {os.path.join(project_root, 'rules')}") from e
+        log_observability("dna_batch_chain", "END", Outcome.ERROR, correlation_id=cid, error_message=str(e))
+        raise RuleLoadError(f"Could not load rules from {rules_path}") from e
 
     # Read DNA strings
     try:
         dna_list = read_input_file(input_file)
     except Exception as e:
+        log_observability("dna_batch_chain", "END", Outcome.ERROR, correlation_id=cid, error_message=str(e))
         raise DNAProcessingError(f"Failed to read input file: {input_file}") from e
 
     if not dna_list:
-        print("[WARN] No DNA strings found in toSequence.txt")
+        log_observability("dna_batch_chain", "END", Outcome.END, correlation_id=cid)
         return
 
     ledger = load_ledger(ledger_path)
+    state = load_system_state(state_path)
+    system_heat = state.get("system_heat", 0.0)
+
+    # Natural cooling at batch start
+    system_heat = max(0.0, system_heat - 1.0)
 
     # 1) Load existing JSON output
     json_output_path = os.path.join(output_folder, 'toSequence_parsed.json')
@@ -120,66 +174,107 @@ def main():
         except Exception:
             pass
 
-    from utils.dna_calculator import RuleParseError
-
     new_processed_count = 0
+    batch_errors = 0
+    batch_successes = 0
+
     for dna_str in dna_list:
         idempotency_key = dna_str
         if idempotency_key in ledger:
-            print(f"[Idempotency] key={idempotency_key} dedupe_hit=True terminal_outcome={ledger[idempotency_key]['terminal_outcome']}")
+            log_observability("dna_batch_chain", "PROCESS_ITEM", Outcome.SKIPPED, correlation_id=cid, idempotency_key=idempotency_key)
             continue
 
-        print(f"[Idempotency] key={idempotency_key} dedupe_hit=False terminal_outcome=processing")
+        log_observability("dna_batch_chain", "PROCESS_ITEM", Outcome.PROCESSING, correlation_id=cid, idempotency_key=idempotency_key)
 
+        error_msg = None
         try:
+            # Fatigue Logic
+            consequence = None
+            if dna_str.startswith("CLA") and system_heat > 2.0:
+                if system_heat > 10.0:
+                    raise ThermalOverloadError(f"Thermal overload ({system_heat:.1f}). REFUSAL_REASON: System too hot for clarity parsing. NEXT_ACTION_HINT: Process lower-energy DNA or wait for cooling.")
+
+                # Penalty: increase noise floor by system_heat
+                consequence = f"CONSEQUENCE_APPLIED: Thermal noise penalty of {int(system_heat)} applied to noise_floor. NEXT_ACTION_HINT: System is warming up."
+
             result = calculator.parse(dna_str)
+
+            # Apply Clarity penalty if needed
+            if consequence and result['rule'] == 'Clarity':
+                # noise_floor is signed N + 3 digits
+                # result['values']['noise_floor'] is {'sign': 'N', 'value': 90}
+                original_val = result['values']['noise_floor']['value']
+                # Penalty: noise floor gets higher (less negative)
+                new_val = max(0, original_val - int(system_heat))
+                result['values']['noise_floor']['value'] = new_val
+                result['values']['thermal_penalty'] = int(system_heat)
+
             entry = {
                 'dna': dna_str,
                 'rule': result['rule'],
-                'parsed': result['values']
+                'parsed': result['values'],
+                'timestamp': datetime.now(timezone.utc).isoformat()
             }
+            if consequence:
+                entry['consequence'] = consequence
+
             parsed_json.append(entry)
 
             # Flatten for CSV
             flat = flatten_parsed(result['rule'], result['values'])
             flat['dna'] = dna_str
             flat['rule'] = result['rule']
+            if consequence:
+                flat['consequence'] = consequence
             csv_rows.append(flat)
             all_flattened_keys.update(flat.keys())
-            outcome = "success"
 
-        except RuleParseError as e:
-            # On parse error, record as error entry
+            # Heat gain from Volume
+            if result['rule'] == 'Volume':
+                amp = result['values'].get('amp', 0)
+                system_heat += amp / 100.0
+
+            outcome = Outcome.SUCCESS
+            batch_successes += 1
+
+        except (RuleParseError, ThermalOverloadError) as e:
+            error_msg = str(e)
             parsed_json.append({
                 'dna': dna_str,
-                'error': str(e)
+                'error': error_msg,
+                'timestamp': datetime.now(timezone.utc).isoformat()
             })
-            # Also put a row in CSV listing error
-            flat = {'dna': dna_str, 'error': str(e)}
+            flat = {'dna': dna_str, 'error': error_msg}
             csv_rows.append(flat)
             all_flattened_keys.update(flat.keys())
-            outcome = f"error: {str(e)}"
+            outcome = Outcome.ERROR
+            batch_errors += 1
+
+        ledger[idempotency_key] = {
+            'terminal_outcome': outcome.value,
+            'timestamp': datetime.now(timezone.utc).isoformat()
+        }
+        log_observability("dna_batch_chain", "PROCESS_ITEM", outcome, correlation_id=cid, idempotency_key=idempotency_key, error_message=error_msg)
+        new_processed_count += 1
 
     # ATOMIC WRITE PATTERN:
-    # 1. Write to a temporary directory in the same filesystem as the output folder
-    # 2. Flush and sync files to ensure they are on disk
-    # 3. Rename them to their final destination (atomic on most OSes)
+    # Stage files in temp, then rename.
+    # We update system_state even if new_processed_count == 0 to persist natural cooling.
 
-    json_output_path = os.path.join(output_folder, 'toSequence_parsed.json')
-    csv_output_path = os.path.join(output_folder, 'toSequence_parsed.csv')
-
-    with tempfile.TemporaryDirectory(dir=output_folder) as tmp_dir:
+    with tempfile.TemporaryDirectory(dir=os.path.join(project_root, 'data')) as tmp_dir:
         tmp_json = os.path.join(tmp_dir, 'output.json')
         tmp_csv = os.path.join(tmp_dir, 'output.csv')
+        tmp_ledger = os.path.join(tmp_dir, 'ledger.json')
+        tmp_state = os.path.join(tmp_dir, 'state.json')
 
         try:
-            # 1) Write JSON output to temp
+            # 1) JSON
             with open(tmp_json, 'w', encoding='utf-8') as jf:
                 json.dump(parsed_json, jf, indent=2)
                 jf.flush()
                 os.fsync(jf.fileno())
 
-            # 2) Write CSV output to temp
+            # 2) CSV
             fieldnames = sorted(all_flattened_keys)
             with open(tmp_csv, 'w', newline='', encoding='utf-8') as cf:
                 writer = csv.DictWriter(cf, fieldnames=fieldnames)
@@ -190,43 +285,44 @@ def main():
                 cf.flush()
                 os.fsync(cf.fileno())
 
-            # 3) Atomic rename (commit)
-            # On Unix, os.replace is atomic. On Windows, it replaces if it exists.
-            os.replace(tmp_json, json_output_path)
-            os.replace(tmp_csv, csv_output_path)
+            # 3) Ledger
+            with open(tmp_ledger, 'w', encoding='utf-8') as lf:
+                json.dump(ledger, lf, indent=2)
+                lf.flush()
+                os.fsync(lf.fileno())
+
+            # 4) State
+            with open(tmp_state, 'w', encoding='utf-8') as sf:
+                json.dump({"system_heat": system_heat}, sf, indent=2)
+                sf.flush()
+                os.fsync(sf.fileno())
+
+            # Atomic rename (commit)
+            if new_processed_count > 0:
+                os.replace(tmp_json, json_output_path)
+                os.replace(tmp_csv, csv_output_path)
+                os.replace(tmp_ledger, ledger_path)
+
+            # Always update state for cooling
+            os.replace(tmp_state, state_path)
 
         except Exception as e:
+            log_observability("dna_batch_chain", "COMMIT", Outcome.ERROR, correlation_id=cid, error_message=str(e))
             raise PersistenceError("Failed to write output files atomically") from e
 
-    print(f"[OK] Parsed {len(dna_list)} DNA strings.")
-        ledger[idempotency_key] = {
-            'terminal_outcome': outcome,
-            'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
-        }
-        print(f"[Idempotency] key={idempotency_key} dedupe_hit=False terminal_outcome={outcome}")
-        new_processed_count += 1
+    final_outcome = Outcome.SUCCESS
+    if batch_errors > 0:
+        final_outcome = Outcome.PARTIAL_SUCCESS if batch_successes > 0 else Outcome.ERROR
+    if new_processed_count == 0:
+        final_outcome = Outcome.NO_NEW_DNA
 
-    if new_processed_count > 0:
-        # Save ledger
-        save_ledger(ledger_path, ledger)
+    latency = int((time.time() - start_time) * 1000)
+    log_observability("dna_batch_chain", "END", final_outcome, correlation_id=cid, latency_ms=latency)
 
-        # Write JSON output
-        with open(json_output_path, 'w', encoding='utf-8') as jf:
-            json.dump(parsed_json, jf, indent=2)
-
-        # Write CSV output
-        fieldnames = sorted(all_flattened_keys)
-        with open(csv_output_path, 'w', newline='', encoding='utf-8') as cf:
-            writer = csv.DictWriter(cf, fieldnames=fieldnames)
-            writer.writeheader()
-            for row in csv_rows:
-                # Ensure every field in fieldnames
-                out = {k: row.get(k, '') for k in fieldnames}
-                writer.writerow(out)
-
-    print(f"[OK] Processed {new_processed_count} new DNA strings. Total in ledger: {len(ledger)}")
-    print(f"     JSON → {json_output_path}")
-    print(f"     CSV  → {csv_output_path}")
+    if dna_list:
+        print(f"[OK] Processed {new_processed_count} DNA strings. Heat: {system_heat:.2f}")
+        print(f"     JSON → {json_output_path}")
+        print(f"     CSV  → {csv_output_path}")
 
 if __name__ == '__main__':
     main()

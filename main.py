@@ -36,8 +36,6 @@ import argparse
 # ─── Import the batch parser and the GUI window ───────────────────────────────
 from utils.dna_ui import main as run_batch
 from utils.providers import RngProvider
-from PySide6.QtWidgets import QApplication
-from ui.main_window import MainWindow
 
 # ─── UTILITY FUNCTIONS ────────────────────────────────────────────────────────
 
@@ -63,12 +61,15 @@ def read_raw_contents(path: str) -> str:
 
 # ─── WATCHER LOOP ──────────────────────────────────────────────────────────────
 
+def get_base_dir():
+    return os.path.dirname(os.path.abspath(__file__))
+
 def watch_loop():
     """
     Continuously watch data/raw/toSequence.txt. Whenever new non‐empty content appears,
     run the batch parser and then clear toSequence.txt. Sleeps 1 second between checks.
     """
-    script_dir = os.path.dirname(os.path.abspath(__file__))
+    script_dir = get_base_dir()
     os.chdir(script_dir)
 
     raw_folder = os.path.join(script_dir, 'data', 'raw')
@@ -90,7 +91,7 @@ def watch_loop():
                 print(f"[{timestamp}] New DNA detected → running parser…")
 
                 try:
-                    run_batch()
+                    run_batch(data_dir=script_dir)
                     # Only clear the input file if run_batch() succeeds
                     clear_input_file(input_file)
                     print(f"[{timestamp}] Parsing complete. Cleared toSequence.txt.\n")
@@ -123,7 +124,7 @@ def process_once():
     Run the batch parser exactly once (reads all lines from toSequence.txt,
     writes output JSON+CSV, then exits).
     """
-    script_dir = os.path.dirname(os.path.abspath(__file__))
+    script_dir = get_base_dir()
     os.chdir(script_dir)
 
     raw_folder = os.path.join(script_dir, 'data', 'raw')
@@ -138,7 +139,7 @@ def process_once():
 
     print("[Once‐Runner] Processing all DNA strings once…")
     try:
-        run_batch()
+        run_batch(data_dir=script_dir)
         print("[Once‐Runner] Done.")
     except Exception as e:
         from utils.dna_ui import DNAProcessingError
@@ -176,8 +177,16 @@ def main():
 
     # Launch PySide6 GUI
     # Ensure working directory is project root
-    script_dir = os.path.dirname(os.path.abspath(__file__))
+    script_dir = get_base_dir()
     os.chdir(script_dir)
+
+    try:
+        from PySide6.QtWidgets import QApplication
+        from ui.main_window import MainWindow
+    except ImportError:
+        print("[ERROR] PySide6 not found. GUI mode unavailable.")
+        print("        Use 'python main.py --once' for headless batch processing.")
+        sys.exit(1)
 
     app = QApplication(sys.argv)
 
