@@ -77,9 +77,41 @@ class TestAtomicity(unittest.TestCase):
 
         json_out = os.path.join(self.output_dir, 'toSequence_parsed.json')
         csv_out = os.path.join(self.output_dir, 'toSequence_parsed.csv')
+        ledger_out = os.path.join(self.data_dir, 'processed_ledger.json')
 
         self.assertFalse(os.path.exists(json_out))
         self.assertFalse(os.path.exists(csv_out))
+        self.assertFalse(os.path.exists(ledger_out))
+
+    def test_ledger_atomicity(self):
+        """Verify that the ledger is NOT updated if the output files fail to write."""
+        ledger_path = os.path.join(self.data_dir, 'processed_ledger.json')
+
+        # First successful run
+        with open(self.input_file, 'w') as f:
+            f.write("V100\n")
+        run_batch()
+        self.assertTrue(os.path.exists(ledger_path))
+        with open(ledger_path, 'r') as f:
+            ledger = json.load(f)
+            self.assertIn("V100", ledger)
+
+        # Second run that fails during write
+        with open(self.input_file, 'w') as f:
+            f.write("V100\nV200\n")
+
+        # Mock os.replace to fail on the second file (or any file)
+        # We need to be careful with side_effect if we want it to fail only after some successes
+        # But here, any failure should roll back the whole batch's intent to update the ledger.
+        with patch('os.replace', side_effect=OSError("Atomic Failure")):
+            with self.assertRaises(PersistenceError):
+                run_batch()
+
+        # Ledger should still only have V100, not V200
+        with open(ledger_path, 'r') as f:
+            ledger = json.load(f)
+            self.assertIn("V100", ledger)
+            self.assertNotIn("V200", ledger)
 
     def test_crash_during_rename(self):
         """Simulate a crash/failure during the atomic rename. No output files should be created/updated."""
@@ -100,13 +132,16 @@ class TestAtomicity(unittest.TestCase):
             del sys.modules['main']
         import main
 
-        # We'll mock run_batch to fail
-        with patch('main.run_batch', side_effect=PersistenceError("Failed")):
-            with patch('main.clear_input_file') as mock_clear:
-                with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
-                    main.process_once()
+        # Need to mock os.path.isfile(input_file) because process_once checks it
+        # and test_dir changes between setup and here.
+        with patch('os.path.isfile', return_value=True):
+            # We'll mock run_batch to fail
+            with patch('main.run_batch', side_effect=PersistenceError("Failed")):
+                with patch('main.clear_input_file') as mock_clear:
+                    with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
+                        main.process_once()
 
-                mock_clear.assert_not_called()
+                    mock_clear.assert_not_called()
 
         # Verify file still has content
         with open(self.input_file, 'r') as f:
