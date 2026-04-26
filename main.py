@@ -68,7 +68,7 @@ def watch_loop():
     Continuously watch data/raw/toSequence.txt. Whenever new non‐empty content appears,
     run the batch parser and then clear toSequence.txt. Sleeps 1 second between checks.
     """
-    script_dir = os.path.dirname(os.path.abspath(__file__))
+    script_dir = get_base_dir()
     os.chdir(script_dir)
 
     raw_folder = os.path.join(script_dir, 'data', 'raw')
@@ -118,12 +118,15 @@ def watch_loop():
 
 # ─── SINGLE‐RUN (NO GUI) MODE ──────────────────────────────────────────────────
 
+def get_base_dir():
+    return os.path.dirname(os.path.abspath(__file__))
+
 def process_once():
     """
     Run the batch parser exactly once (reads all lines from toSequence.txt,
     writes output JSON+CSV, then exits).
     """
-    script_dir = os.path.dirname(os.path.abspath(__file__))
+    script_dir = get_base_dir()
     os.chdir(script_dir)
 
     raw_folder = os.path.join(script_dir, 'data', 'raw')
@@ -176,7 +179,7 @@ def main():
 
     # Launch PySide6 GUI
     # Ensure working directory is project root
-    script_dir = os.path.dirname(os.path.abspath(__file__))
+    script_dir = get_base_dir()
     os.chdir(script_dir)
 
     app = QApplication(sys.argv)

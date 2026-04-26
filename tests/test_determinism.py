@@ -1,8 +1,15 @@
-import numpy as np
+try:
+    import numpy as np
+    HAS_NUMPY = True
+except ImportError:
+    HAS_NUMPY = False
+
 import pytest
+import unittest
 from ui.music_panel import gen_wave
 from utils.providers import RngProvider
 
+@unittest.skipIf(not HAS_NUMPY, "numpy not available")
 @pytest.mark.parametrize("wave_type", [
     "Sample & Hold",
     "Stepped Random",
