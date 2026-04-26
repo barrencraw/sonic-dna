@@ -47,22 +47,20 @@ class TestAtomicity(unittest.TestCase):
                 }
             }, f)
 
-        self.old_cwd = os.getcwd()
-        os.chdir(self.test_dir)
-
     def tearDown(self):
-        os.chdir(self.old_cwd)
         shutil.rmtree(self.test_dir)
 
     def test_successful_parsing(self):
         """Verify that parsing works correctly under normal conditions."""
-        run_batch()
+        run_batch(project_root=self.test_dir)
 
         json_out = os.path.join(self.output_dir, 'toSequence_parsed.json')
         csv_out = os.path.join(self.output_dir, 'toSequence_parsed.csv')
+        ledger_out = os.path.join(self.data_dir, 'processed_ledger.json')
 
         self.assertTrue(os.path.exists(json_out))
         self.assertTrue(os.path.exists(csv_out))
+        self.assertTrue(os.path.exists(ledger_out))
 
         with open(json_out, 'r') as f:
             data = json.load(f)
@@ -73,7 +71,7 @@ class TestAtomicity(unittest.TestCase):
         """Simulate a crash during JSON writing. No output files should be created."""
         with patch('json.dump', side_effect=IOError("Disk Full")):
             with self.assertRaises(PersistenceError):
-                run_batch()
+                run_batch(project_root=self.test_dir)
 
         json_out = os.path.join(self.output_dir, 'toSequence_parsed.json')
         csv_out = os.path.join(self.output_dir, 'toSequence_parsed.csv')
@@ -85,7 +83,7 @@ class TestAtomicity(unittest.TestCase):
         """Simulate a crash/failure during the atomic rename. No output files should be created/updated."""
         with patch('os.replace', side_effect=OSError("Permission Denied")):
             with self.assertRaises(PersistenceError):
-                run_batch()
+                run_batch(project_root=self.test_dir)
 
         json_out = os.path.join(self.output_dir, 'toSequence_parsed.json')
         csv_out = os.path.join(self.output_dir, 'toSequence_parsed.csv')
@@ -95,18 +93,16 @@ class TestAtomicity(unittest.TestCase):
 
     def test_watcher_behavior_on_failure(self):
         """Test main.py's logic: if run_batch fails, input file should NOT be cleared."""
-        # Force import after mocks
-        if 'main' in sys.modules:
-            del sys.modules['main']
         import main
 
-        # We'll mock run_batch to fail
-        with patch('main.run_batch', side_effect=PersistenceError("Failed")):
-            with patch('main.clear_input_file') as mock_clear:
-                with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
-                    main.process_once()
+        # Patch main.get_base_dir to return our test_dir
+        with patch('main.get_base_dir', return_value=self.test_dir):
+            with patch('main.run_batch', side_effect=PersistenceError("Failed")):
+                with patch('main.clear_input_file') as mock_clear:
+                    with self.assertRaises(SystemExit):
+                        main.process_once()
 
-                mock_clear.assert_not_called()
+                    mock_clear.assert_not_called()
 
         # Verify file still has content
         with open(self.input_file, 'r') as f:
