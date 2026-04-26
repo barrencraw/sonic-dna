@@ -1,30 +1,6 @@
 #!/usr/bin/env python3
 """
 main.py
-
-– If run directly (python main.py), this will launch your PySide6 GUI (ui/main_window.py),
-  but also start a background watcher that “watches” data/raw/toSequence.txt. Any time
-  you append new DNA lines to that file, it automatically:
-     • calls dna_ui.main() → which parses all lines and writes JSON/CSV to data/output/
-     • clears toSequence.txt so those lines aren’t re‐parsed
-
-– If you want to run only a one‐time batch parse (no GUI), you can launch with
-    python main.py --once
-  and it will parse everything in toSequence.txt exactly once, write outputs, then exit.
-
-Directory layout (relative to where this main.py lives):
-
-  /your_project_root/
-  ├─ main.py
-  ├─ dna_calculator.py
-  ├─ dna_ui.py
-  ├─ ui/
-  │   └─ main_window.py     ← your existing PySide6 window code
-  ├─ rules/                 ← all your rule_*.json files
-  └─ data/
-      ├─ raw/
-      │   └─ toSequence.txt ← add one DNA string per line here
-      └─ output/            ← results (toSequence_parsed.json + .csv) get written here
 """
 
 import os
@@ -36,10 +12,18 @@ import argparse
 # ─── Import the batch parser and the GUI window ───────────────────────────────
 from utils.dna_ui import main as run_batch
 from utils.providers import RngProvider
-from PySide6.QtWidgets import QApplication
-from ui.main_window import MainWindow
+try:
+    from PySide6.QtWidgets import QApplication
+    from ui.main_window import MainWindow
+    HAS_GUI = True
+except ImportError:
+    HAS_GUI = False
 
 # ─── UTILITY FUNCTIONS ────────────────────────────────────────────────────────
+
+def get_base_dir():
+    """Return the absolute path of the directory containing this script."""
+    return os.path.dirname(os.path.abspath(__file__))
 
 def ensure_folder(path: str):
     """Create the folder if it doesn’t exist."""
@@ -68,13 +52,9 @@ def watch_loop():
     Continuously watch data/raw/toSequence.txt. Whenever new non‐empty content appears,
     run the batch parser and then clear toSequence.txt. Sleeps 1 second between checks.
     """
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    os.chdir(script_dir)
-
-    raw_folder = os.path.join(script_dir, 'data', 'raw')
-    output_folder = os.path.join(script_dir, 'data', 'output')
+    base_dir = get_base_dir()
+    raw_folder = os.path.join(base_dir, 'data', 'raw')
     ensure_folder(raw_folder)
-    ensure_folder(output_folder)
 
     input_file = os.path.join(raw_folder, 'toSequence.txt')
     last_content = ""
@@ -90,7 +70,7 @@ def watch_loop():
                 print(f"[{timestamp}] New DNA detected → running parser…")
 
                 try:
-                    run_batch()
+                    run_batch(project_root=base_dir)
                     # Only clear the input file if run_batch() succeeds
                     clear_input_file(input_file)
                     print(f"[{timestamp}] Parsing complete. Cleared toSequence.txt.\n")
@@ -123,13 +103,9 @@ def process_once():
     Run the batch parser exactly once (reads all lines from toSequence.txt,
     writes output JSON+CSV, then exits).
     """
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    os.chdir(script_dir)
-
-    raw_folder = os.path.join(script_dir, 'data', 'raw')
-    output_folder = os.path.join(script_dir, 'data', 'output')
+    base_dir = get_base_dir()
+    raw_folder = os.path.join(base_dir, 'data', 'raw')
     ensure_folder(raw_folder)
-    ensure_folder(output_folder)
 
     input_file = os.path.join(raw_folder, 'toSequence.txt')
     if not os.path.isfile(input_file):
@@ -138,7 +114,7 @@ def process_once():
 
     print("[Once‐Runner] Processing all DNA strings once…")
     try:
-        run_batch()
+        run_batch(project_root=base_dir)
         print("[Once‐Runner] Done.")
     except Exception as e:
         from utils.dna_ui import DNAProcessingError
@@ -174,11 +150,15 @@ def main():
     watcher_thread.start()
     print("[main.py] Watcher thread started in background.")
 
-    # Launch PySide6 GUI
-    # Ensure working directory is project root
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    os.chdir(script_dir)
+    if not HAS_GUI:
+        print("[main.py] GUI dependencies not found. Watcher is running. Press Ctrl+C to exit.")
+        try:
+            while True:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            return
 
+    # Launch PySide6 GUI
     app = QApplication(sys.argv)
 
     # Initialize Determinism Providers
