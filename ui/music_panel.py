@@ -1,9 +1,20 @@
-import numpy as np
+try:
+    import numpy as np
+    HAS_NUMPY = True
+except ImportError:
+    HAS_NUMPY = False
+    np = None
+
 try:
     import sounddevice as sd
-except OSError:
+except (OSError, ImportError):
     sd = None
-from scipy.io.wavfile import write as write_wav
+
+try:
+    from scipy.io.wavfile import write as write_wav
+    HAS_SCIPY = True
+except ImportError:
+    HAS_SCIPY = False
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFileDialog, QComboBox
@@ -40,6 +51,9 @@ BASE_SOUNDS = [
 ]
 
 def gen_wave(wave_type, volume=0.8, rng=None):
+    if not HAS_NUMPY:
+        print("numpy is required for gen_wave")
+        return None
     t = np.linspace(0, DURATION, int(SAMPLE_RATE * DURATION), endpoint=False)
 
     if rng is None:
@@ -141,11 +155,19 @@ def gen_wave(wave_type, volume=0.8, rng=None):
 class WaveformWidget(QWidget):
     def __init__(self):
         super().__init__()
-        self.data = np.zeros(512)
+        if HAS_NUMPY:
+            self.data = np.zeros(512)
+        else:
+            self.data = [0.0] * 512
         self.setMinimumHeight(140)
 
     def set_wave(self, data):
-        self.data = data[:512] if len(data) > 512 else np.pad(data, (0, max(0, 512 - len(data))))
+        if data is None:
+            return
+        if HAS_NUMPY:
+            self.data = data[:512] if len(data) > 512 else np.pad(data, (0, max(0, 512 - len(data))))
+        else:
+            self.data = data[:512]
         self.update()
 
     def paintEvent(self, event):
@@ -223,9 +245,11 @@ class MusicPanel(QWidget):
                 sd.stop()
 
     def download_wave(self):
-        if self.current_wave is not None:
+        if self.current_wave is not None and HAS_NUMPY and HAS_SCIPY:
             file_path, _ = QFileDialog.getSaveFileName(self, "Save WAV File", "sound.wav", "WAV Files (*.wav)")
             if file_path:
                 # Normalize to 16-bit PCM for WAV export
                 audio = (self.current_wave * 32767).astype(np.int16)
                 write_wav(file_path, SAMPLE_RATE, audio)
+        else:
+            print("Export failed: numpy/scipy not available.")
