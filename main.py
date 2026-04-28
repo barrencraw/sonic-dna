@@ -36,10 +36,11 @@ import argparse
 # ─── Import the batch parser and the GUI window ───────────────────────────────
 from utils.dna_ui import main as run_batch
 from utils.providers import RngProvider
-from PySide6.QtWidgets import QApplication
-from ui.main_window import MainWindow
 
 # ─── UTILITY FUNCTIONS ────────────────────────────────────────────────────────
+
+def get_base_dir():
+    return os.path.dirname(os.path.abspath(__file__))
 
 def ensure_folder(path: str):
     """Create the folder if it doesn’t exist."""
@@ -68,8 +69,7 @@ def watch_loop():
     Continuously watch data/raw/toSequence.txt. Whenever new non‐empty content appears,
     run the batch parser and then clear toSequence.txt. Sleeps 1 second between checks.
     """
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    os.chdir(script_dir)
+    script_dir = get_base_dir()
 
     raw_folder = os.path.join(script_dir, 'data', 'raw')
     output_folder = os.path.join(script_dir, 'data', 'output')
@@ -90,7 +90,7 @@ def watch_loop():
                 print(f"[{timestamp}] New DNA detected → running parser…")
 
                 try:
-                    run_batch()
+                    run_batch(data_dir=script_dir)
                     # Only clear the input file if run_batch() succeeds
                     clear_input_file(input_file)
                     print(f"[{timestamp}] Parsing complete. Cleared toSequence.txt.\n")
@@ -123,8 +123,7 @@ def process_once():
     Run the batch parser exactly once (reads all lines from toSequence.txt,
     writes output JSON+CSV, then exits).
     """
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    os.chdir(script_dir)
+    script_dir = get_base_dir()
 
     raw_folder = os.path.join(script_dir, 'data', 'raw')
     output_folder = os.path.join(script_dir, 'data', 'output')
@@ -138,7 +137,7 @@ def process_once():
 
     print("[Once‐Runner] Processing all DNA strings once…")
     try:
-        run_batch()
+        run_batch(data_dir=script_dir)
         print("[Once‐Runner] Done.")
     except Exception as e:
         from utils.dna_ui import DNAProcessingError
@@ -176,17 +175,29 @@ def main():
 
     # Launch PySide6 GUI
     # Ensure working directory is project root
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    os.chdir(script_dir)
+    script_dir = get_base_dir()
 
-    app = QApplication(sys.argv)
+    try:
+        from PySide6.QtWidgets import QApplication
+        from ui.main_window import MainWindow
+        app = QApplication(sys.argv)
 
-    # Initialize Determinism Providers
-    rng = RngProvider()  # Default non-deterministic for normal usage, or seed if needed
+        # Initialize Determinism Providers
+        rng = RngProvider()  # Default non-deterministic for normal usage, or seed if needed
 
-    win = MainWindow(rng=rng)
-    win.show()
-    sys.exit(app.exec())
+        win = MainWindow(rng=rng)
+        win.show()
+        sys.exit(app.exec())
+    except ImportError:
+        print("[main.py] PySide6 not found. GUI mode is disabled.")
+        # If in watcher mode, we just keep running (it's already in a thread,
+        # but here it's the main thread if we didn't return from args.once)
+        # However, watcher is a daemon thread, so we need to keep the main thread alive.
+        try:
+            while True:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            print("\n[main.py] Interrupted by user. Exiting.")
 
 if __name__ == "__main__":
     main()
