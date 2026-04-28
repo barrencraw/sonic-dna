@@ -33,11 +33,9 @@ import time
 import threading
 import argparse
 
-# ─── Import the batch parser and the GUI window ───────────────────────────────
+# ─── Import the batch parser ──────────────────────────────────────────────────
 from utils.dna_ui import main as run_batch
 from utils.providers import RngProvider
-from PySide6.QtWidgets import QApplication
-from ui.main_window import MainWindow
 
 # ─── UTILITY FUNCTIONS ────────────────────────────────────────────────────────
 
@@ -175,6 +173,13 @@ def main():
     print("[main.py] Watcher thread started in background.")
 
     # Launch PySide6 GUI
+    try:
+        from PySide6.QtWidgets import QApplication
+        from ui.main_window import MainWindow
+    except ImportError:
+        print("[CRITICAL] PySide6 not found. GUI mode unavailable.")
+        sys.exit(1)
+
     # Ensure working directory is project root
     script_dir = os.path.dirname(os.path.abspath(__file__))
     os.chdir(script_dir)
