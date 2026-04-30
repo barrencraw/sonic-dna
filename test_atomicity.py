@@ -100,17 +100,43 @@ class TestAtomicity(unittest.TestCase):
             del sys.modules['main']
         import main
 
-        # We'll mock run_batch to fail
-        with patch('main.run_batch', side_effect=PersistenceError("Failed")):
-            with patch('main.clear_input_file') as mock_clear:
-                with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
-                    main.process_once()
+        # Mock get_base_dir to return our test_dir
+        with patch('main.os.path.dirname', return_value=self.test_dir):
+            with patch('main.os.path.abspath', return_value=self.test_dir):
+                # We'll mock run_batch to fail
+                with patch('main.run_batch', side_effect=PersistenceError("Failed")):
+                    with patch('main.clear_input_file') as mock_clear:
+                        with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
+                            main.process_once()
 
-                mock_clear.assert_not_called()
+                        mock_clear.assert_not_called()
 
         # Verify file still has content
         with open(self.input_file, 'r') as f:
             self.assertEqual(f.read().strip(), "V100")
+
+    def test_atomic_ledger_update(self):
+        """Verify that ledger is NOT updated if writing outputs fails."""
+        ledger_path = os.path.join(self.data_dir, 'processed_ledger.json')
+
+        # 1. Success case
+        run_batch()
+        with open(ledger_path, 'r') as f:
+            ledger = json.load(f)
+        self.assertIn('V100', ledger)
+
+        # 2. Failure case with new DNA
+        with open(self.input_file, 'w') as f:
+            f.write("V200\n")
+
+        with patch('os.replace', side_effect=OSError("Atomic Rename Failed")):
+            with self.assertRaises(PersistenceError):
+                run_batch()
+
+        # Ledger should NOT have V200
+        with open(ledger_path, 'r') as f:
+            ledger = json.load(f)
+        self.assertNotIn('V200', ledger)
 
 if __name__ == '__main__':
     unittest.main()
