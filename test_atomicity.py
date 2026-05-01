@@ -10,6 +10,9 @@ sys.modules["PySide6.QtGui"] = mock_pyside6
 sys.modules["torch"] = MagicMock()
 sys.modules["torchaudio"] = MagicMock()
 sys.modules["sounddevice"] = MagicMock()
+sys.modules["numpy"] = MagicMock()
+sys.modules["scipy"] = MagicMock()
+sys.modules["scipy.io.wavfile"] = MagicMock()
 
 import unittest
 import os
@@ -71,7 +74,14 @@ class TestAtomicity(unittest.TestCase):
 
     def test_crash_during_json_write(self):
         """Simulate a crash during JSON writing. No output files should be created."""
-        with patch('json.dump', side_effect=IOError("Disk Full")):
+        # Use a wrapper to only fail for the output files, not for system_state or ledger
+        original_dump = json.dump
+        def side_effect(obj, f, *args, **kwargs):
+            if 'output.json' in str(f) or 'output.csv' in str(f):
+                raise IOError("Disk Full")
+            return original_dump(obj, f, *args, **kwargs)
+
+        with patch('json.dump', side_effect=side_effect):
             with self.assertRaises(PersistenceError):
                 run_batch()
 
@@ -100,13 +110,16 @@ class TestAtomicity(unittest.TestCase):
             del sys.modules['main']
         import main
 
-        # We'll mock run_batch to fail
-        with patch('main.run_batch', side_effect=PersistenceError("Failed")):
-            with patch('main.clear_input_file') as mock_clear:
-                with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
-                    main.process_once()
+        # Ensure we use the right paths for testing
+        with patch('main.get_base_dir', return_value=self.test_dir):
+            with patch('main.run_batch', side_effect=PersistenceError("Failed")):
+                with patch('main.clear_input_file') as mock_clear:
+                    # process_once catches exceptions and calls sys.exit(1)
+                    with patch('sys.exit') as mock_exit:
+                        main.process_once()
+                        mock_exit.assert_called_with(1)
 
-                mock_clear.assert_not_called()
+                    mock_clear.assert_not_called()
 
         # Verify file still has content
         with open(self.input_file, 'r') as f:
