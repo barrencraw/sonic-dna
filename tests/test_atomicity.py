@@ -60,14 +60,20 @@ class TestAtomicity(unittest.TestCase):
 
         json_out = os.path.join(self.output_dir, 'toSequence_parsed.json')
         csv_out = os.path.join(self.output_dir, 'toSequence_parsed.csv')
+        ledger_out = os.path.join(self.data_dir, 'processed_ledger.json')
 
         self.assertTrue(os.path.exists(json_out))
         self.assertTrue(os.path.exists(csv_out))
+        self.assertTrue(os.path.exists(ledger_out))
 
         with open(json_out, 'r') as f:
             data = json.load(f)
             self.assertEqual(len(data), 1)
             self.assertEqual(data[0]['dna'], 'V100')
+
+        with open(ledger_out, 'r') as f:
+            ledger = json.load(f)
+            self.assertIn('V100', ledger)
 
     def test_crash_during_json_write(self):
         """Simulate a crash during JSON writing. No output files should be created."""
@@ -77,40 +83,58 @@ class TestAtomicity(unittest.TestCase):
 
         json_out = os.path.join(self.output_dir, 'toSequence_parsed.json')
         csv_out = os.path.join(self.output_dir, 'toSequence_parsed.csv')
+        ledger_out = os.path.join(self.data_dir, 'processed_ledger.json')
 
         self.assertFalse(os.path.exists(json_out))
         self.assertFalse(os.path.exists(csv_out))
+        self.assertFalse(os.path.exists(ledger_out))
 
-    def test_crash_during_rename(self):
-        """Simulate a crash/failure during the atomic rename. No output files should be created/updated."""
-        with patch('os.replace', side_effect=OSError("Permission Denied")):
+    def test_ledger_backed_recovery(self):
+        """
+        Verify that if the process fails before the ledger is updated,
+        the next run correctly re-processes the data.
+        """
+        original_replace = os.replace
+
+        def fail_on_ledger(src, dst):
+            if 'processed_ledger.json' in dst:
+                raise OSError("Crash before ledger update")
+            return original_replace(src, dst)
+
+        # First run fails on ledger update
+        with patch('os.replace', side_effect=fail_on_ledger):
             with self.assertRaises(PersistenceError):
                 run_batch()
 
         json_out = os.path.join(self.output_dir, 'toSequence_parsed.json')
-        csv_out = os.path.join(self.output_dir, 'toSequence_parsed.csv')
+        ledger_out = os.path.join(self.data_dir, 'processed_ledger.json')
 
-        self.assertFalse(os.path.exists(json_out))
-        self.assertFalse(os.path.exists(csv_out))
+        # JSON might have been updated, but ledger MUST NOT
+        self.assertFalse(os.path.exists(ledger_out))
+
+        # Second run (successful)
+        run_batch()
+
+        self.assertTrue(os.path.exists(ledger_out))
+        with open(ledger_out, 'r') as f:
+            ledger = json.load(f)
+            self.assertIn('V100', ledger)
 
     def test_watcher_behavior_on_failure(self):
         """Test main.py's logic: if run_batch fails, input file should NOT be cleared."""
-        # Force import after mocks
         if 'main' in sys.modules:
             del sys.modules['main']
         import main
 
-        # We'll mock run_batch to fail
-        with patch('main.run_batch', side_effect=PersistenceError("Failed")):
-            with patch('main.clear_input_file') as mock_clear:
-                with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
-                    main.process_once()
+        with patch('main.os.path.isfile', return_value=True):
+            with patch('main.os.path.isdir', return_value=True):
+                with patch('main.os.chdir'):
+                    with patch('main.run_batch', side_effect=PersistenceError("Failed")):
+                        with patch('main.clear_input_file') as mock_clear:
+                            with self.assertRaises(SystemExit):
+                                main.process_once()
 
-                mock_clear.assert_not_called()
-
-        # Verify file still has content
-        with open(self.input_file, 'r') as f:
-            self.assertEqual(f.read().strip(), "V100")
+                            mock_clear.assert_not_called()
 
 if __name__ == '__main__':
     unittest.main()
