@@ -3,7 +3,29 @@ import os
 import json
 import csv
 import time
+import uuid
+from enum import Enum
 from utils.dna_calculator import DNACalculator, RuleParseError
+
+def log_observability(step, outcome, correlation_id, actor_id='system', extra=None):
+    payload = {
+        'correlation_id': correlation_id,
+        'chain_name': 'dna_batch_chain',
+        'step': step,
+        'outcome': outcome if isinstance(outcome, str) else outcome.name,
+        'actor_id': actor_id,
+        'timestamp': time.time()
+    }
+    if extra:
+        payload.update(extra)
+    print(f"| TELEMETRY | {json.dumps(payload)}")
+
+class Outcome(Enum):
+    START = "START"
+    SUCCESS = "SUCCESS"
+    ERROR = "ERROR"
+    SKIPPED = "SKIPPED"
+    END = "END"
 
 def ensure_folder(path):
     if not os.path.isdir(path):
@@ -63,7 +85,12 @@ def save_ledger(ledger_path, ledger):
     with open(ledger_path, 'w', encoding='utf-8') as f:
         json.dump(ledger, f, indent=2)
 
-def main():
+def main(correlation_id=None):
+    if not correlation_id:
+        correlation_id = str(uuid.uuid4())
+
+    log_observability('batch_start', Outcome.START, correlation_id)
+
     # Determine file paths
     project_root = os.getcwd()
     raw_folder = os.path.join(project_root, 'data', 'raw')
@@ -126,27 +153,33 @@ def main():
     for dna_str in dna_list:
         idempotency_key = dna_str
         if idempotency_key in ledger:
-            print(f"[Idempotency] key={idempotency_key} dedupe_hit=True terminal_outcome={ledger[idempotency_key]['terminal_outcome']}")
+            log_observability('idempotency_check', Outcome.SKIPPED, correlation_id, extra={
+                'idempotency_key': idempotency_key,
+                'dedupe_hit': True
+            })
             continue
 
-        print(f"[Idempotency] key={idempotency_key} dedupe_hit=False terminal_outcome=processing")
+        log_observability('idempotency_check', Outcome.START, correlation_id, extra={
+            'idempotency_key': idempotency_key,
+            'dedupe_hit': False
+        })
 
         try:
             result = calculator.parse(dna_str)
             entry = {
-                'dna': dna_str,
-                'rule': result['rule'],
-                'parsed': result['values']
+                'dna': result.dna,
+                'rule': result.rule,
+                'parsed': result.values
             }
             parsed_json.append(entry)
 
             # Flatten for CSV
-            flat = flatten_parsed(result['rule'], result['values'])
-            flat['dna'] = dna_str
-            flat['rule'] = result['rule']
+            flat = flatten_parsed(result.rule, result.values)
+            flat['dna'] = result.dna
+            flat['rule'] = result.rule
             csv_rows.append(flat)
             all_flattened_keys.update(flat.keys())
-            outcome = "success"
+            outcome = Outcome.SUCCESS
 
         except RuleParseError as e:
             # On parse error, record as error entry
@@ -158,75 +191,70 @@ def main():
             flat = {'dna': dna_str, 'error': str(e)}
             csv_rows.append(flat)
             all_flattened_keys.update(flat.keys())
-            outcome = f"error: {str(e)}"
+            outcome = Outcome.ERROR
 
-    # ATOMIC WRITE PATTERN:
-    # 1. Write to a temporary directory in the same filesystem as the output folder
-    # 2. Flush and sync files to ensure they are on disk
-    # 3. Rename them to their final destination (atomic on most OSes)
-
-    json_output_path = os.path.join(output_folder, 'toSequence_parsed.json')
-    csv_output_path = os.path.join(output_folder, 'toSequence_parsed.csv')
-
-    with tempfile.TemporaryDirectory(dir=output_folder) as tmp_dir:
-        tmp_json = os.path.join(tmp_dir, 'output.json')
-        tmp_csv = os.path.join(tmp_dir, 'output.csv')
-
-        try:
-            # 1) Write JSON output to temp
-            with open(tmp_json, 'w', encoding='utf-8') as jf:
-                json.dump(parsed_json, jf, indent=2)
-                jf.flush()
-                os.fsync(jf.fileno())
-
-            # 2) Write CSV output to temp
-            fieldnames = sorted(all_flattened_keys)
-            with open(tmp_csv, 'w', newline='', encoding='utf-8') as cf:
-                writer = csv.DictWriter(cf, fieldnames=fieldnames)
-                writer.writeheader()
-                for row in csv_rows:
-                    out = {k: row.get(k, '') for k in fieldnames}
-                    writer.writerow(out)
-                cf.flush()
-                os.fsync(cf.fileno())
-
-            # 3) Atomic rename (commit)
-            # On Unix, os.replace is atomic. On Windows, it replaces if it exists.
-            os.replace(tmp_json, json_output_path)
-            os.replace(tmp_csv, csv_output_path)
-
-        except Exception as e:
-            raise PersistenceError("Failed to write output files atomically") from e
-
-    print(f"[OK] Parsed {len(dna_list)} DNA strings.")
         ledger[idempotency_key] = {
-            'terminal_outcome': outcome,
+            'terminal_outcome': outcome.name,
             'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
         }
-        print(f"[Idempotency] key={idempotency_key} dedupe_hit=False terminal_outcome={outcome}")
+        log_observability('item_processed', outcome, correlation_id, extra={
+            'idempotency_key': idempotency_key
+        })
         new_processed_count += 1
 
     if new_processed_count > 0:
-        # Save ledger
-        save_ledger(ledger_path, ledger)
+        # ATOMIC WRITE PATTERN:
+        # 1. Write to a temporary directory in the same filesystem as the output folder
+        # 2. Flush and sync files to ensure they are on disk
+        # 3. Rename them to their final destination (atomic on most OSes)
 
-        # Write JSON output
-        with open(json_output_path, 'w', encoding='utf-8') as jf:
-            json.dump(parsed_json, jf, indent=2)
+        json_output_path = os.path.join(output_folder, 'toSequence_parsed.json')
+        csv_output_path = os.path.join(output_folder, 'toSequence_parsed.csv')
+        # We also want to write the ledger atomically if possible, though it's in the parent dir
+        # For now, let's keep the outputs atomic.
 
-        # Write CSV output
-        fieldnames = sorted(all_flattened_keys)
-        with open(csv_output_path, 'w', newline='', encoding='utf-8') as cf:
-            writer = csv.DictWriter(cf, fieldnames=fieldnames)
-            writer.writeheader()
-            for row in csv_rows:
-                # Ensure every field in fieldnames
-                out = {k: row.get(k, '') for k in fieldnames}
-                writer.writerow(out)
+        output_dir = os.path.dirname(json_output_path)
+        with tempfile.TemporaryDirectory(dir=output_dir) as tmp_dir:
+            tmp_json = os.path.join(tmp_dir, 'output.json')
+            tmp_csv = os.path.join(tmp_dir, 'output.csv')
+            tmp_ledger = os.path.join(tmp_dir, 'processed_ledger.json')
 
-    print(f"[OK] Processed {new_processed_count} new DNA strings. Total in ledger: {len(ledger)}")
-    print(f"     JSON → {json_output_path}")
-    print(f"     CSV  → {csv_output_path}")
+            try:
+                # 1) Write JSON output to temp
+                with open(tmp_json, 'w', encoding='utf-8') as jf:
+                    json.dump(parsed_json, jf, indent=2)
+                    jf.flush()
+                    os.fsync(jf.fileno())
+
+                # 2) Write CSV output to temp
+                fieldnames = sorted(all_flattened_keys)
+                with open(tmp_csv, 'w', newline='', encoding='utf-8') as cf:
+                    writer = csv.DictWriter(cf, fieldnames=fieldnames)
+                    writer.writeheader()
+                    for row in csv_rows:
+                        out = {k: row.get(k, '') for k in fieldnames}
+                        writer.writerow(out)
+                    cf.flush()
+                    os.fsync(cf.fileno())
+
+                # 3) Write Ledger to temp
+                with open(tmp_ledger, 'w', encoding='utf-8') as lf:
+                    json.dump(ledger, lf, indent=2)
+                    lf.flush()
+                    os.fsync(lf.fileno())
+
+                # 4) Atomic rename (commit)
+                os.replace(tmp_json, json_output_path)
+                os.replace(tmp_csv, csv_output_path)
+                os.replace(tmp_ledger, ledger_path)
+
+            except Exception as e:
+                raise PersistenceError("Failed to write output files atomically") from e
+
+    log_observability('batch_end', Outcome.END, correlation_id, extra={
+        'new_processed_count': new_processed_count,
+        'total_ledger_count': len(ledger)
+    })
 
 if __name__ == '__main__':
     main()
