@@ -112,5 +112,22 @@ class TestAtomicity(unittest.TestCase):
         with open(self.input_file, 'r') as f:
             self.assertEqual(f.read().strip(), "V100")
 
+    def test_ledger_not_updated_on_failure(self):
+        """Specifically verify that the ledger file is not updated if output writes fail."""
+        ledger_file = os.path.join(self.data_dir, 'processed_ledger.json')
+        # Ensure it exists and is empty
+        with open(ledger_file, 'w') as f:
+            json.dump({}, f)
+
+        # Mock a failure during JSON writing
+        with patch('json.dump', side_effect=IOError("Disk Full")):
+            with self.assertRaises(PersistenceError):
+                run_batch()
+
+        # Verify ledger file is still empty on disk
+        with open(ledger_file, 'r') as f:
+            ledger_data = json.load(f)
+            self.assertEqual(ledger_data, {}, "Ledger should NOT be updated on disk if processing fails.")
+
 if __name__ == '__main__':
     unittest.main()
