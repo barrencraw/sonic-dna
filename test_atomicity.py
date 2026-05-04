@@ -71,7 +71,14 @@ class TestAtomicity(unittest.TestCase):
 
     def test_crash_during_json_write(self):
         """Simulate a crash during JSON writing. No output files should be created."""
-        with patch('json.dump', side_effect=IOError("Disk Full")):
+        # Use a side_effect that only raises for the target output file to avoid breaking other logic
+        original_dump = json.dump
+        def side_effect(obj, fp, **kwargs):
+            if hasattr(fp, 'name') and 'output.json' in fp.name:
+                raise IOError("Disk Full")
+            return original_dump(obj, fp, **kwargs)
+
+        with patch('json.dump', side_effect=side_effect):
             with self.assertRaises(PersistenceError):
                 run_batch()
 
@@ -100,11 +107,21 @@ class TestAtomicity(unittest.TestCase):
             del sys.modules['main']
         import main
 
-        # We'll mock run_batch to fail
+        # The input file path in main.process_once is based on the script's directory.
+        # Ensure it points to where our test files are.
+        script_dir = os.path.dirname(os.path.abspath(main.__file__))
+
         with patch('main.run_batch', side_effect=PersistenceError("Failed")):
             with patch('main.clear_input_file') as mock_clear:
-                with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
-                    main.process_once()
+                with patch('sys.exit') as mock_exit:
+                    # We need to make sure main.process_once finds our input file.
+                    # It uses script_dir/data/raw/toSequence.txt.
+                    # But our test_dir is where we are currently.
+
+                    # Instead of relying on main's discovery, let's just mock os.path.isfile
+                    with patch('os.path.isfile', return_value=True):
+                        main.process_once()
+                        mock_exit.assert_called_with(1)
 
                 mock_clear.assert_not_called()
 
