@@ -10,6 +10,10 @@ sys.modules["PySide6.QtGui"] = mock_pyside6
 sys.modules["torch"] = MagicMock()
 sys.modules["torchaudio"] = MagicMock()
 sys.modules["sounddevice"] = MagicMock()
+sys.modules["numpy"] = MagicMock()
+sys.modules["scipy"] = MagicMock()
+sys.modules["scipy.io"] = MagicMock()
+sys.modules["scipy.io.wavfile"] = MagicMock()
 
 import unittest
 import os
@@ -89,9 +93,26 @@ class TestAtomicity(unittest.TestCase):
 
         json_out = os.path.join(self.output_dir, 'toSequence_parsed.json')
         csv_out = os.path.join(self.output_dir, 'toSequence_parsed.csv')
+        ledger_out = os.path.join(self.data_dir, 'processed_ledger.json')
 
         self.assertFalse(os.path.exists(json_out))
         self.assertFalse(os.path.exists(csv_out))
+        self.assertFalse(os.path.exists(ledger_out))
+
+    def test_ledger_not_updated_on_failure(self):
+        """Verify that the ledger is NOT updated if writing output fails."""
+        # Mock json.dump to fail only when writing to the output JSON/CSV file paths
+        # but succeed for everything else (like building the ledger in-memory if needed)
+        # Actually, our code writes all 3 to temp then renames.
+        # If any write to temp fails, persistence error is raised.
+
+        # Patching json.dump to raise error
+        with patch('json.dump', side_effect=IOError("Disk Full")):
+            with self.assertRaises(PersistenceError):
+                run_batch()
+
+        ledger_out = os.path.join(self.data_dir, 'processed_ledger.json')
+        self.assertFalse(os.path.exists(ledger_out))
 
     def test_watcher_behavior_on_failure(self):
         """Test main.py's logic: if run_batch fails, input file should NOT be cleared."""
@@ -103,8 +124,13 @@ class TestAtomicity(unittest.TestCase):
         # We'll mock run_batch to fail
         with patch('main.run_batch', side_effect=PersistenceError("Failed")):
             with patch('main.clear_input_file') as mock_clear:
-                with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
-                    main.process_once()
+                # Instead of mocking os.path.join (which causes recursion),
+                # we'll mock os.chdir to be a no-op or just handle it.
+                # Actually, main.py does script_dir = os.path.dirname(os.path.abspath(__file__)).
+                # We can mock os.path.abspath to return something under test_dir.
+                with patch('main.os.path.abspath', return_value=os.path.join(self.test_dir, 'main.py')):
+                    with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
+                        main.process_once()
 
                 mock_clear.assert_not_called()
 
