@@ -76,7 +76,7 @@ def watch_loop():
     ensure_folder(raw_folder)
     ensure_folder(output_folder)
 
-    input_file = os.path.join(raw_folder, 'toSequence.txt')
+    input_file = os.path.join(os.getcwd(), 'data', 'raw', 'toSequence.txt')
     last_content = ""
 
     print("[Watcher] Started. Monitoring data/raw/toSequence.txt for new DNA lines…")
@@ -118,20 +118,23 @@ def watch_loop():
 
 # ─── SINGLE‐RUN (NO GUI) MODE ──────────────────────────────────────────────────
 
-def process_once():
+def process_once(data_dir=None):
     """
     Run the batch parser exactly once (reads all lines from toSequence.txt,
     writes output JSON+CSV, then exits).
     """
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    os.chdir(script_dir)
+    if data_dir:
+        os.chdir(os.path.dirname(data_dir))
+    else:
+        os.chdir(script_dir)
 
     raw_folder = os.path.join(script_dir, 'data', 'raw')
     output_folder = os.path.join(script_dir, 'data', 'output')
     ensure_folder(raw_folder)
     ensure_folder(output_folder)
 
-    input_file = os.path.join(raw_folder, 'toSequence.txt')
+    input_file = os.path.join(os.getcwd(), 'data', 'raw', 'toSequence.txt')
     if not os.path.isfile(input_file):
         print(f"[ERROR] Input file not found: {input_file}")
         return
