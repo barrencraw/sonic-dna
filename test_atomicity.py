@@ -48,7 +48,7 @@ class TestAtomicity(unittest.TestCase):
             }, f)
 
         self.old_cwd = os.getcwd()
-        os.chdir(self.test_dir)
+        # DO NOT change cwd, use data_dir parameter instead
 
     def tearDown(self):
         os.chdir(self.old_cwd)
@@ -56,7 +56,7 @@ class TestAtomicity(unittest.TestCase):
 
     def test_successful_parsing(self):
         """Verify that parsing works correctly under normal conditions."""
-        run_batch()
+        run_batch(data_dir=self.test_dir)
 
         json_out = os.path.join(self.output_dir, 'toSequence_parsed.json')
         csv_out = os.path.join(self.output_dir, 'toSequence_parsed.csv')
@@ -73,7 +73,7 @@ class TestAtomicity(unittest.TestCase):
         """Simulate a crash during JSON writing. No output files should be created."""
         with patch('json.dump', side_effect=IOError("Disk Full")):
             with self.assertRaises(PersistenceError):
-                run_batch()
+                run_batch(data_dir=self.test_dir)
 
         json_out = os.path.join(self.output_dir, 'toSequence_parsed.json')
         csv_out = os.path.join(self.output_dir, 'toSequence_parsed.csv')
@@ -85,7 +85,7 @@ class TestAtomicity(unittest.TestCase):
         """Simulate a crash/failure during the atomic rename. No output files should be created/updated."""
         with patch('os.replace', side_effect=OSError("Permission Denied")):
             with self.assertRaises(PersistenceError):
-                run_batch()
+                run_batch(data_dir=self.test_dir)
 
         json_out = os.path.join(self.output_dir, 'toSequence_parsed.json')
         csv_out = os.path.join(self.output_dir, 'toSequence_parsed.csv')
@@ -103,9 +103,10 @@ class TestAtomicity(unittest.TestCase):
         # We'll mock run_batch to fail
         with patch('main.run_batch', side_effect=PersistenceError("Failed")):
             with patch('main.clear_input_file') as mock_clear:
-                with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
-                    main.process_once()
+                with self.assertRaises(SystemExit) as cm:
+                    main.process_once(data_dir=self.test_dir)
 
+                self.assertEqual(cm.exception.code, 1)
                 mock_clear.assert_not_called()
 
         # Verify file still has content
