@@ -3,6 +3,16 @@ import json
 import shutil
 import unittest
 import time
+import sys
+from unittest.mock import MagicMock
+
+# Mock scientific dependencies
+sys.modules["numpy"] = MagicMock()
+sys.modules["scipy"] = MagicMock()
+sys.modules["scipy.io"] = MagicMock()
+sys.modules["scipy.io.wavfile"] = MagicMock()
+sys.modules["sounddevice"] = MagicMock()
+
 from utils.dna_ui import main as run_batch
 
 class TestIdempotency(unittest.TestCase):
