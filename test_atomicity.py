@@ -71,7 +71,15 @@ class TestAtomicity(unittest.TestCase):
 
     def test_crash_during_json_write(self):
         """Simulate a crash during JSON writing. No output files should be created."""
-        with patch('json.dump', side_effect=IOError("Disk Full")):
+        # Use a side effect that only raises for the output JSON/CSV paths
+        original_dump = json.dump
+        def side_effect(obj, fp, **kwargs):
+            # fp might be a file object, so check its name if it has one
+            if hasattr(fp, 'name') and ('output.json' in fp.name or 'output.csv' in fp.name):
+                raise IOError("Disk Full")
+            return original_dump(obj, fp, **kwargs)
+
+        with patch('json.dump', side_effect=side_effect):
             with self.assertRaises(PersistenceError):
                 run_batch()
 
@@ -98,15 +106,16 @@ class TestAtomicity(unittest.TestCase):
         # Force import after mocks
         if 'main' in sys.modules:
             del sys.modules['main']
-        import main
 
-        # We'll mock run_batch to fail
-        with patch('main.run_batch', side_effect=PersistenceError("Failed")):
-            with patch('main.clear_input_file') as mock_clear:
-                with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
-                    main.process_once()
+        with patch('utils.dna_ui.main', side_effect=PersistenceError("Failed")):
+            import main
+            # We'll mock run_batch to fail
+            with patch('main.run_batch', side_effect=PersistenceError("Failed")):
+                with patch('main.clear_input_file') as mock_clear:
+                    with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
+                        main.process_once()
 
-                mock_clear.assert_not_called()
+                    mock_clear.assert_not_called()
 
         # Verify file still has content
         with open(self.input_file, 'r') as f:
