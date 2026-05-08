@@ -63,15 +63,17 @@ def read_raw_contents(path: str) -> str:
 
 # ─── WATCHER LOOP ──────────────────────────────────────────────────────────────
 
-def watch_loop():
+def watch_loop(data_dir=None):
     """
     Continuously watch data/raw/toSequence.txt. Whenever new non‐empty content appears,
     run the batch parser and then clear toSequence.txt. Sleeps 1 second between checks.
     """
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    os.chdir(script_dir)
+    if not data_dir:
+        data_dir = os.path.dirname(os.path.abspath(__file__))
 
-    raw_folder = os.path.join(script_dir, 'data', 'raw')
+    os.chdir(data_dir)
+
+    raw_folder = os.path.join(data_dir, 'data', 'raw')
     output_folder = os.path.join(script_dir, 'data', 'output')
     ensure_folder(raw_folder)
     ensure_folder(output_folder)
@@ -90,7 +92,7 @@ def watch_loop():
                 print(f"[{timestamp}] New DNA detected → running parser…")
 
                 try:
-                    run_batch()
+                    run_batch(data_dir=data_dir)
                     # Only clear the input file if run_batch() succeeds
                     clear_input_file(input_file)
                     print(f"[{timestamp}] Parsing complete. Cleared toSequence.txt.\n")
@@ -118,27 +120,27 @@ def watch_loop():
 
 # ─── SINGLE‐RUN (NO GUI) MODE ──────────────────────────────────────────────────
 
-def process_once():
+def process_once(data_dir=None):
     """
     Run the batch parser exactly once (reads all lines from toSequence.txt,
     writes output JSON+CSV, then exits).
     """
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    os.chdir(script_dir)
+    if not data_dir:
+        data_dir = os.getcwd()
 
-    raw_folder = os.path.join(script_dir, 'data', 'raw')
-    output_folder = os.path.join(script_dir, 'data', 'output')
+    raw_folder = os.path.join(data_dir, 'data', 'raw')
+    output_folder = os.path.join(data_dir, 'data', 'output')
     ensure_folder(raw_folder)
     ensure_folder(output_folder)
 
     input_file = os.path.join(raw_folder, 'toSequence.txt')
     if not os.path.isfile(input_file):
         print(f"[ERROR] Input file not found: {input_file}")
-        return
+        sys.exit(1)
 
     print("[Once‐Runner] Processing all DNA strings once…")
     try:
-        run_batch()
+        run_batch(data_dir=data_dir)
         print("[Once‐Runner] Done.")
     except Exception as e:
         from utils.dna_ui import DNAProcessingError
