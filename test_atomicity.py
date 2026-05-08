@@ -2,6 +2,10 @@ import sys
 from unittest.mock import MagicMock
 
 # Mock dependencies before any imports
+sys.modules["numpy"] = MagicMock()
+sys.modules["scipy"] = MagicMock()
+sys.modules["scipy.io"] = MagicMock()
+sys.modules["scipy.io.wavfile"] = MagicMock()
 mock_pyside6 = MagicMock()
 sys.modules["PySide6"] = mock_pyside6
 sys.modules["PySide6.QtWidgets"] = mock_pyside6
