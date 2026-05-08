@@ -2,6 +2,14 @@
 import os
 import json
 import re
+from dataclasses import dataclass
+from typing import Dict, Any
+
+@dataclass
+class ParsedDNA:
+    dna: str
+    rule: str
+    values: Dict[str, Any]
 
 class RuleParseError(Exception):
     pass
@@ -21,10 +29,9 @@ class Rule:
         for subvar_name, subvar_schema in self.subvars.items():
             self.plan.append((subvar_name, subvar_schema))
 
-    def parse(self, dna_string):
+    def parse(self, dna_string) -> ParsedDNA:
         """
-        Given a DNA string (complete, including prefix), return a nested dict:
-        { subvar_name: value or {child: ...}, ... }.
+        Given a DNA string (complete, including prefix), return a ParsedDNA DTO.
         """
         if not dna_string.startswith(self.prefix):
             raise RuleParseError(f"DNA '{dna_string}' does not start with prefix '{self.prefix}'")
@@ -39,7 +46,7 @@ class Rule:
                 f"Extra characters after parsing rule '{self.variable}': "
                 f"parsed up to index {idx}, string length {len(dna_string)}"
             )
-        return values
+        return ParsedDNA(dna=dna_string, rule=self.variable, values=values)
 
     def serialize(self, values_dict):
         """
@@ -263,16 +270,15 @@ class DNACalculator:
                     raise RuleParseError(f"Duplicate prefix '{rule.prefix}' in {fname}")
                 self.rules[rule.prefix] = rule
 
-    def parse(self, dna_string):
+    def parse(self, dna_string) -> ParsedDNA:
         """
         Identify which rule applies (by prefix), then parse.
-        Returns { 'rule': variable_name, 'values': nested_dict }.
+        Returns a ParsedDNA DTO.
         """
         # Try to match any known prefix
         for prefix, rule in self.rules.items():
             if dna_string.startswith(prefix):
-                parsed = rule.parse(dna_string)
-                return {'rule': rule.variable, 'values': parsed}
+                return rule.parse(dna_string)
         raise RuleParseError(f"No matching rule for DNA '{dna_string}'")
 
     def serialize(self, variable_name, values_dict):
