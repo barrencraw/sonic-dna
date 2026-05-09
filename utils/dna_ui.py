@@ -50,6 +50,16 @@ class RuleLoadError(DNAProcessingError):
 class PersistenceError(DNAProcessingError):
     """Raised when writing or moving output files fails."""
     pass
+
+class ThermalOverloadError(DNAProcessingError):
+    """Raised when the system heat exceeds safe limits."""
+    pass
+
+# UI Message Keys
+CONSEQUENCE_APPLIED = "CONSEQUENCE_APPLIED"
+REFUSAL_REASON = "REFUSAL_REASON"
+NEXT_ACTION_HINT = "NEXT_ACTION_HINT"
+
 def load_ledger(ledger_path):
     if os.path.exists(ledger_path):
         try:
@@ -63,18 +73,42 @@ def save_ledger(ledger_path, ledger):
     with open(ledger_path, 'w', encoding='utf-8') as f:
         json.dump(ledger, f, indent=2)
 
+def load_system_state(state_path):
+    if os.path.exists(state_path):
+        try:
+            with open(state_path, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception:
+            return {"system_heat": 0.0}
+    return {"system_heat": 0.0}
+
+def save_system_state(state_path, state):
+    with open(state_path, 'w', encoding='utf-8') as f:
+        json.dump(state, f, indent=2)
+
 def main():
     # Determine file paths
     project_root = os.getcwd()
     raw_folder = os.path.join(project_root, 'data', 'raw')
     output_folder = os.path.join(project_root, 'data', 'output')
     ledger_path = os.path.join(project_root, 'data', 'processed_ledger.json')
+    state_path = os.path.join(project_root, 'data', 'system_state.json')
     ensure_folder(output_folder)
+
+    # Load and dissipate system heat
+    state = load_system_state(state_path)
+    state['system_heat'] = max(0.0, round(state['system_heat'] - 0.5, 2))
 
     input_file = os.path.join(raw_folder, 'toSequence.txt')
     if not os.path.isfile(input_file):
         print(f"[ERROR] Input file not found: {input_file}")
         return
+
+    # Thermal Overload Check
+    if state['system_heat'] >= 10.0:
+        print(f"[{REFUSAL_REASON}] System heat at {state['system_heat']}. {NEXT_ACTION_HINT}")
+        save_system_state(state_path, state)
+        raise ThermalOverloadError(f"{REFUSAL_REASON}: Heat {state['system_heat']}")
 
     # Instantiate calculator
     try:
@@ -90,6 +124,7 @@ def main():
 
     if not dna_list:
         print("[WARN] No DNA strings found in toSequence.txt")
+        save_system_state(state_path, state)
         return
 
     ledger = load_ledger(ledger_path)
@@ -133,6 +168,33 @@ def main():
 
         try:
             result = calculator.parse(dna_str)
+
+            # TRADE-OFF LOGIC
+            if result['rule'] == 'Volume':
+                amp = result['values'].get('amp', 0)
+                heat_gain = amp / 100.0
+                if heat_gain > 0:
+                    state['system_heat'] = round(state['system_heat'] + heat_gain, 2)
+                    print(f"[{CONSEQUENCE_APPLIED}] Volume processing increased system heat by {heat_gain}. Current heat: {state['system_heat']}")
+
+            elif result['rule'] == 'Clarity':
+                if state['system_heat'] > 0:
+                    penalty = int(state['system_heat'])
+                    # Noise floor penalty
+                    if 'noise_floor' in result['values']:
+                        nf = result['values']['noise_floor']
+                        old_val = nf['value']
+                        nf['value'] = max(0, nf['value'] - penalty)
+                        if old_val != nf['value']:
+                             print(f"[{CONSEQUENCE_APPLIED}] Thermal noise elevated noise floor from -{old_val} to -{nf['value']}dBFS.")
+
+                    # THD penalty
+                    if 'thd' in result['values']:
+                        old_thd = result['values']['thd']
+                        result['values']['thd'] = min(1000, result['values']['thd'] + penalty * 10)
+                        if old_thd != result['values']['thd']:
+                             print(f"[{CONSEQUENCE_APPLIED}] Thermal stress increased THD from {old_thd*0.01:.2f}% to {result['values']['thd']*0.01:.2f}%.")
+
             entry = {
                 'dna': dna_str,
                 'rule': result['rule'],
@@ -159,6 +221,14 @@ def main():
             csv_rows.append(flat)
             all_flattened_keys.update(flat.keys())
             outcome = f"error: {str(e)}"
+
+        # Update ledger inside the loop
+        ledger[idempotency_key] = {
+            'terminal_outcome': outcome,
+            'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
+        }
+        print(f"[Idempotency] key={idempotency_key} dedupe_hit=False terminal_outcome={outcome}")
+        new_processed_count += 1
 
     # ATOMIC WRITE PATTERN:
     # 1. Write to a temporary directory in the same filesystem as the output folder
@@ -191,40 +261,20 @@ def main():
                 os.fsync(cf.fileno())
 
             # 3) Atomic rename (commit)
-            # On Unix, os.replace is atomic. On Windows, it replaces if it exists.
             os.replace(tmp_json, json_output_path)
             os.replace(tmp_csv, csv_output_path)
 
         except Exception as e:
             raise PersistenceError("Failed to write output files atomically") from e
 
-    print(f"[OK] Parsed {len(dna_list)} DNA strings.")
-        ledger[idempotency_key] = {
-            'terminal_outcome': outcome,
-            'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
-        }
-        print(f"[Idempotency] key={idempotency_key} dedupe_hit=False terminal_outcome={outcome}")
-        new_processed_count += 1
-
+    # Save ledger and system state
     if new_processed_count > 0:
-        # Save ledger
         save_ledger(ledger_path, ledger)
 
-        # Write JSON output
-        with open(json_output_path, 'w', encoding='utf-8') as jf:
-            json.dump(parsed_json, jf, indent=2)
-
-        # Write CSV output
-        fieldnames = sorted(all_flattened_keys)
-        with open(csv_output_path, 'w', newline='', encoding='utf-8') as cf:
-            writer = csv.DictWriter(cf, fieldnames=fieldnames)
-            writer.writeheader()
-            for row in csv_rows:
-                # Ensure every field in fieldnames
-                out = {k: row.get(k, '') for k in fieldnames}
-                writer.writerow(out)
+    save_system_state(state_path, state)
 
     print(f"[OK] Processed {new_processed_count} new DNA strings. Total in ledger: {len(ledger)}")
+    print(f"     System Heat: {state['system_heat']}")
     print(f"     JSON → {json_output_path}")
     print(f"     CSV  → {csv_output_path}")
 
