@@ -118,12 +118,12 @@ def watch_loop():
 
 # ─── SINGLE‐RUN (NO GUI) MODE ──────────────────────────────────────────────────
 
-def process_once():
+def process_once(data_dir=None):
     """
     Run the batch parser exactly once (reads all lines from toSequence.txt,
     writes output JSON+CSV, then exits).
     """
-    script_dir = os.path.dirname(os.path.abspath(__file__))
+    script_dir = data_dir or os.path.dirname(os.path.abspath(__file__))
     os.chdir(script_dir)
 
     raw_folder = os.path.join(script_dir, 'data', 'raw')
