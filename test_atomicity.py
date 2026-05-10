@@ -10,6 +10,10 @@ sys.modules["PySide6.QtGui"] = mock_pyside6
 sys.modules["torch"] = MagicMock()
 sys.modules["torchaudio"] = MagicMock()
 sys.modules["sounddevice"] = MagicMock()
+sys.modules["numpy"] = MagicMock()
+sys.modules["scipy"] = MagicMock()
+sys.modules["scipy.io"] = MagicMock()
+sys.modules["scipy.io.wavfile"] = MagicMock()
 
 import unittest
 import os
@@ -98,14 +102,21 @@ class TestAtomicity(unittest.TestCase):
         # Force import after mocks
         if 'main' in sys.modules:
             del sys.modules['main']
-        import main
 
-        # We'll mock run_batch to fail
-        with patch('main.run_batch', side_effect=PersistenceError("Failed")):
+        # Patch dna_ui.main before main.py imports it
+        with patch('utils.dna_ui.main', side_effect=PersistenceError("Failed")):
+            import main
+
+            # Use real paths relative to current test_dir (which is already CWD)
+            raw_dir = os.path.join(os.getcwd(), 'data', 'raw')
+            os.makedirs(raw_dir, exist_ok=True)
+            input_file = os.path.join(raw_dir, 'toSequence.txt')
+            with open(input_file, 'w') as f:
+                f.write("V100\n")
+
             with patch('main.clear_input_file') as mock_clear:
                 with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
                     main.process_once()
-
                 mock_clear.assert_not_called()
 
         # Verify file still has content
