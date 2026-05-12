@@ -32,6 +32,7 @@ import sys
 import time
 import threading
 import argparse
+import uuid
 
 # ─── Import the batch parser and the GUI window ───────────────────────────────
 from utils.dna_ui import main as run_batch
@@ -86,21 +87,22 @@ def watch_loop():
 
             # If there’s new non‐empty content that differs from last run, process it:
             if current_content.strip() and current_content != last_content:
-                timestamp = time.strftime('%Y-%m-%d %H:%M:%S')
-                print(f"[{timestamp}] New DNA detected → running parser…")
+                correlation_id = str(uuid.uuid4())[:8]
+                start_time = time.time()
+                print(f"[LOG] correlation_id={correlation_id} chain_name=watcher_loop step=detection outcome=success")
 
                 try:
-                    run_batch()
+                    run_batch(correlation_id=correlation_id)
                     # Only clear the input file if run_batch() succeeds
                     clear_input_file(input_file)
-                    print(f"[{timestamp}] Parsing complete. Cleared toSequence.txt.\n")
+                    latency_ms = int((time.time() - start_time) * 1000)
+                    print(f"[LOG] correlation_id={correlation_id} chain_name=watcher_loop step=batch_complete outcome=success latency_ms={latency_ms}")
                 except Exception as e:
+                    latency_ms = int((time.time() - start_time) * 1000)
                     # Classify errors
                     from utils.dna_ui import DNAProcessingError
-                    if isinstance(e, DNAProcessingError):
-                        print(f"[{timestamp}][Watcher][CRITICAL] DNA processing failed: {e}")
-                    else:
-                        print(f"[{timestamp}][Watcher][ERROR] Unexpected error: {e}")
+                    outcome = "dna_processing_error" if isinstance(e, DNAProcessingError) else "unexpected_error"
+                    print(f"[LOG] correlation_id={correlation_id} chain_name=watcher_loop step=batch_complete outcome={outcome} latency_ms={latency_ms} error=\"{e}\"")
                     # In case of error, we DO NOT clear the input file so we can retry or investigate
 
                 # Reset last_content so we’ll catch the next chunk of DNA
@@ -136,16 +138,18 @@ def process_once():
         print(f"[ERROR] Input file not found: {input_file}")
         return
 
-    print("[Once‐Runner] Processing all DNA strings once…")
+    correlation_id = str(uuid.uuid4())[:8]
+    start_time = time.time()
+    print(f"[LOG] correlation_id={correlation_id} chain_name=once_runner step=start outcome=success")
     try:
-        run_batch()
-        print("[Once‐Runner] Done.")
+        run_batch(correlation_id=correlation_id)
+        latency_ms = int((time.time() - start_time) * 1000)
+        print(f"[LOG] correlation_id={correlation_id} chain_name=once_runner step=complete outcome=success latency_ms={latency_ms}")
     except Exception as e:
+        latency_ms = int((time.time() - start_time) * 1000)
         from utils.dna_ui import DNAProcessingError
-        if isinstance(e, DNAProcessingError):
-            print(f"[Once‐Runner][CRITICAL] DNA processing failed: {e}")
-        else:
-            print(f"[Once‐Runner][ERROR] Unexpected error: {e}")
+        outcome = "dna_processing_error" if isinstance(e, DNAProcessingError) else "unexpected_error"
+        print(f"[LOG] correlation_id={correlation_id} chain_name=once_runner step=complete outcome={outcome} latency_ms={latency_ms} error=\"{e}\"")
         sys.exit(1)
 
 # ─── MAIN ENTRYPOINT ───────────────────────────────────────────────────────────
