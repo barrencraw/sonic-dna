@@ -32,9 +32,10 @@ import sys
 import time
 import threading
 import argparse
+import uuid
 
 # ─── Import the batch parser and the GUI window ───────────────────────────────
-from utils.dna_ui import main as run_batch
+from utils.dna_ui import main as run_batch, log_structured
 from utils.providers import RngProvider
 from PySide6.QtWidgets import QApplication
 from ui.main_window import MainWindow
@@ -87,10 +88,12 @@ def watch_loop():
             # If there’s new non‐empty content that differs from last run, process it:
             if current_content.strip() and current_content != last_content:
                 timestamp = time.strftime('%Y-%m-%d %H:%M:%S')
-                print(f"[{timestamp}] New DNA detected → running parser…")
+                print(f"[{timestamp}] New DNA sequences detected → running parser…")
 
+                corr_id = str(uuid.uuid4())
+                log_structured("watcher_chain", "detected", "success", correlation_id=corr_id)
                 try:
-                    run_batch()
+                    run_batch(correlation_id=corr_id)
                     # Only clear the input file if run_batch() succeeds
                     clear_input_file(input_file)
                     print(f"[{timestamp}] Parsing complete. Cleared toSequence.txt.\n")
@@ -136,10 +139,11 @@ def process_once():
         print(f"[ERROR] Input file not found: {input_file}")
         return
 
-    print("[Once‐Runner] Processing all DNA strings once…")
+    corr_id = str(uuid.uuid4())
+    log_structured("once_runner_chain", "start", "success", correlation_id=corr_id)
     try:
-        run_batch()
-        print("[Once‐Runner] Done.")
+        run_batch(correlation_id=corr_id)
+        log_structured("once_runner_chain", "finish", "success", correlation_id=corr_id)
     except Exception as e:
         from utils.dna_ui import DNAProcessingError
         if isinstance(e, DNAProcessingError):
