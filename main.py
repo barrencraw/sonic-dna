@@ -91,9 +91,9 @@ def watch_loop():
 
                 try:
                     run_batch()
-                    # Only clear the input file if run_batch() succeeds
-                    clear_input_file(input_file)
-                    print(f"[{timestamp}] Parsing complete. Cleared toSequence.txt.\n")
+                    # dna_ui.main (run_batch) now clears the file on success.
+                    # Redundant clear is safe but logs are better.
+                    print(f"[{timestamp}] Parsing complete.\n")
                 except Exception as e:
                     # Classify errors
                     from utils.dna_ui import DNAProcessingError
@@ -118,16 +118,19 @@ def watch_loop():
 
 # ─── SINGLE‐RUN (NO GUI) MODE ──────────────────────────────────────────────────
 
-def process_once():
+def process_once(data_dir=None):
     """
     Run the batch parser exactly once (reads all lines from toSequence.txt,
     writes output JSON+CSV, then exits).
     """
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    os.chdir(script_dir)
+    if data_dir:
+        os.chdir(data_dir)
+    else:
+        os.chdir(script_dir)
 
-    raw_folder = os.path.join(script_dir, 'data', 'raw')
-    output_folder = os.path.join(script_dir, 'data', 'output')
+    raw_folder = os.path.join(os.getcwd(), 'data', 'raw')
+    output_folder = os.path.join(os.getcwd(), 'data', 'output')
     ensure_folder(raw_folder)
     ensure_folder(output_folder)
 
