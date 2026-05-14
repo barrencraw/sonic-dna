@@ -65,7 +65,7 @@ def read_raw_contents(path: str) -> str:
 
 def watch_loop():
     """
-    Continuously watch data/raw/toSequence.txt. Whenever new non‐empty content appears,
+    Continuously watch data/raw/toSequence.txt. Whenever new non-empty content appears,
     run the batch parser and then clear toSequence.txt. Sleeps 1 second between checks.
     """
     script_dir = os.path.dirname(os.path.abspath(__file__))
