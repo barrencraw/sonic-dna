@@ -33,6 +33,8 @@ class TestAtomicity(unittest.TestCase):
         os.makedirs(self.rules_dir)
 
         self.input_file = os.path.join(self.raw_dir, 'toSequence.txt')
+        self.ledger_file = os.path.join(self.data_dir, 'processed_ledger.json')
+
         with open(self.input_file, 'w') as f:
             f.write("V100\n")
 
@@ -63,6 +65,7 @@ class TestAtomicity(unittest.TestCase):
 
         self.assertTrue(os.path.exists(json_out))
         self.assertTrue(os.path.exists(csv_out))
+        self.assertTrue(os.path.exists(self.ledger_file))
 
         with open(json_out, 'r') as f:
             data = json.load(f)
@@ -80,6 +83,7 @@ class TestAtomicity(unittest.TestCase):
 
         self.assertFalse(os.path.exists(json_out))
         self.assertFalse(os.path.exists(csv_out))
+        self.assertFalse(os.path.exists(self.ledger_file))
 
     def test_crash_during_rename(self):
         """Simulate a crash/failure during the atomic rename. No output files should be created/updated."""
@@ -92,6 +96,32 @@ class TestAtomicity(unittest.TestCase):
 
         self.assertFalse(os.path.exists(json_out))
         self.assertFalse(os.path.exists(csv_out))
+        self.assertFalse(os.path.exists(self.ledger_file))
+
+    def test_partial_rename_failure(self):
+        """
+        Adversarial: Simulate failure after JSON rename but before CSV/Ledger rename.
+        In reality, os.replace is atomic, but we can simulate a failure in the loop.
+        Actually, our implementation does 3 separate os.replace calls.
+        If one fails, the others might have succeeded.
+        This test checks that if we fail in the middle of renames, we raise PersistenceError.
+        """
+        original_replace = os.replace
+        call_count = 0
+        def side_effect(src, dst):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 2: # Fail on second rename (CSV)
+                raise OSError("Atomic Break")
+            return original_replace(src, dst)
+
+        with patch('os.replace', side_effect=side_effect):
+            with self.assertRaises(PersistenceError):
+                run_batch()
+
+        # In this adversarial case, JSON might exist but CSV/Ledger might not.
+        # This is why 'true' atomicity across 3 files is hard without a directory swap.
+        # But we at least ensure it's reported as a PersistenceError so the watcher doesn't clear the input.
 
     def test_watcher_behavior_on_failure(self):
         """Test main.py's logic: if run_batch fails, input file should NOT be cleared."""
@@ -104,7 +134,7 @@ class TestAtomicity(unittest.TestCase):
         with patch('main.run_batch', side_effect=PersistenceError("Failed")):
             with patch('main.clear_input_file') as mock_clear:
                 with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
-                    main.process_once()
+                    main.process_once(data_dir=self.test_dir)
 
                 mock_clear.assert_not_called()
 
