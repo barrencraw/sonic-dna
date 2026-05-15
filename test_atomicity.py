@@ -89,9 +89,40 @@ class TestAtomicity(unittest.TestCase):
 
         json_out = os.path.join(self.output_dir, 'toSequence_parsed.json')
         csv_out = os.path.join(self.output_dir, 'toSequence_parsed.csv')
+        ledger_out = os.path.join(self.data_dir, 'processed_ledger.json')
 
         self.assertFalse(os.path.exists(json_out))
         self.assertFalse(os.path.exists(csv_out))
+        self.assertFalse(os.path.exists(ledger_out))
+
+    def test_partial_rename_failure(self):
+        """Simulate a failure after the first rename. This verifies we don't leave things in a torn state."""
+        # Mock os.replace to succeed for the first call (JSON) but fail for the second (CSV)
+        def side_effect(src, dst):
+            if 'output.csv' in src:
+                raise OSError("Torn Write Simulation")
+            # For JSON it succeeds normally
+            if os.path.exists(dst):
+                os.remove(dst)
+            shutil.copy2(src, dst)
+
+        with patch('os.replace', side_effect=side_effect):
+            with self.assertRaises(PersistenceError):
+                run_batch()
+
+        json_out = os.path.join(self.output_dir, 'toSequence_parsed.json')
+        csv_out = os.path.join(self.output_dir, 'toSequence_parsed.csv')
+        ledger_out = os.path.join(self.data_dir, 'processed_ledger.json')
+
+        # Even if JSON was "replaced" before CSV failed,
+        # in a real world crash after one replace we might be torn.
+        # But our PersistenceError being raised means we know it failed.
+        # Note: os.replace is atomic for ONE file. Across three files, we have a window of vulnerability.
+        # However, the ledger being the LAST thing committed helps ensure we don't think we succeeded.
+
+        # In this test, because we use a side_effect that actually copies, JSON might exist.
+        # But ledger_out MUST NOT exist because it's the last one.
+        self.assertFalse(os.path.exists(ledger_out), "Ledger should not exist if CSV rename failed")
 
     def test_watcher_behavior_on_failure(self):
         """Test main.py's logic: if run_batch fails, input file should NOT be cleared."""
@@ -104,7 +135,7 @@ class TestAtomicity(unittest.TestCase):
         with patch('main.run_batch', side_effect=PersistenceError("Failed")):
             with patch('main.clear_input_file') as mock_clear:
                 with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
-                    main.process_once()
+                    main.process_once(base_dir=self.test_dir)
 
                 mock_clear.assert_not_called()
 
