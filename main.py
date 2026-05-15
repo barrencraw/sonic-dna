@@ -36,8 +36,12 @@ import argparse
 # ─── Import the batch parser and the GUI window ───────────────────────────────
 from utils.dna_ui import main as run_batch
 from utils.providers import RngProvider
-from PySide6.QtWidgets import QApplication
-from ui.main_window import MainWindow
+try:
+    from PySide6.QtWidgets import QApplication
+    from ui.main_window import MainWindow
+    HAS_PYSIDE = True
+except ImportError:
+    HAS_PYSIDE = False
 
 # ─── UTILITY FUNCTIONS ────────────────────────────────────────────────────────
 
@@ -63,16 +67,17 @@ def read_raw_contents(path: str) -> str:
 
 # ─── WATCHER LOOP ──────────────────────────────────────────────────────────────
 
-def watch_loop():
+def watch_loop(base_dir=None):
     """
     Continuously watch data/raw/toSequence.txt. Whenever new non‐empty content appears,
     run the batch parser and then clear toSequence.txt. Sleeps 1 second between checks.
     """
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    os.chdir(script_dir)
+    if base_dir is None:
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+    os.chdir(base_dir)
 
-    raw_folder = os.path.join(script_dir, 'data', 'raw')
-    output_folder = os.path.join(script_dir, 'data', 'output')
+    raw_folder = os.path.join(base_dir, 'data', 'raw')
+    output_folder = os.path.join(base_dir, 'data', 'output')
     ensure_folder(raw_folder)
     ensure_folder(output_folder)
 
@@ -90,7 +95,7 @@ def watch_loop():
                 print(f"[{timestamp}] New DNA detected → running parser…")
 
                 try:
-                    run_batch()
+                    run_batch(project_root=base_dir)
                     # Only clear the input file if run_batch() succeeds
                     clear_input_file(input_file)
                     print(f"[{timestamp}] Parsing complete. Cleared toSequence.txt.\n")
@@ -118,16 +123,17 @@ def watch_loop():
 
 # ─── SINGLE‐RUN (NO GUI) MODE ──────────────────────────────────────────────────
 
-def process_once():
+def process_once(base_dir=None):
     """
     Run the batch parser exactly once (reads all lines from toSequence.txt,
     writes output JSON+CSV, then exits).
     """
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    os.chdir(script_dir)
+    if base_dir is None:
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+    os.chdir(base_dir)
 
-    raw_folder = os.path.join(script_dir, 'data', 'raw')
-    output_folder = os.path.join(script_dir, 'data', 'output')
+    raw_folder = os.path.join(base_dir, 'data', 'raw')
+    output_folder = os.path.join(base_dir, 'data', 'output')
     ensure_folder(raw_folder)
     ensure_folder(output_folder)
 
@@ -138,7 +144,7 @@ def process_once():
 
     print("[Once‐Runner] Processing all DNA strings once…")
     try:
-        run_batch()
+        run_batch(project_root=base_dir)
         print("[Once‐Runner] Done.")
     except Exception as e:
         from utils.dna_ui import DNAProcessingError
@@ -168,6 +174,10 @@ def main():
         # Run batch a single time, then exit
         process_once()
         return
+
+    if not HAS_PYSIDE:
+        print("[ERROR] PySide6 not installed. GUI mode unavailable.")
+        sys.exit(1)
 
     # Otherwise: start watcher, then launch GUI
     watcher_thread = threading.Thread(target=watch_loop, daemon=True)
