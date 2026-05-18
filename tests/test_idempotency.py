@@ -3,7 +3,7 @@ import json
 import shutil
 import unittest
 import time
-from utils.dna_ui import main as run_batch
+from utils.dna_ui import main as run_batch, DataIntegrityError
 
 class TestIdempotency(unittest.TestCase):
     def setUp(self):
@@ -58,7 +58,7 @@ class TestIdempotency(unittest.TestCase):
         with open(self.ledger_path, 'r') as f:
             ledger = json.load(f)
         self.assertIn(dna, ledger)
-        self.assertEqual(ledger[dna]['terminal_outcome'], 'success')
+        self.assertEqual(ledger[dna]['terminal_outcome'], 'SUCCESS')
 
         # 2. Second invocation with same DNA
         with open(self.input_file, 'w') as f:
@@ -102,13 +102,8 @@ class TestIdempotency(unittest.TestCase):
             ledger = json.load(f)
         self.assertIn(dna, ledger)
 
-        # Simulate a crash where the output file was lost but ledger remained (or vice-versa)
-        # If output file is lost, next run should NOT re-process if it's in the ledger.
-        # WAIT: The requirement is "retry after transient failure → eventual consistency without corruption".
-        # If the output file is cumulative and we lose it, but keep the ledger, we might miss the data.
-        # But idempotency usually means "don't do it again if you already did it".
-
         # Let's test if it handles corrupted output file gracefully.
+        # NOW: it should RAISE DataIntegrityError to prevent data loss.
         with open(self.json_output, 'w') as f:
             f.write("CORRUPTED")
 
@@ -116,15 +111,8 @@ class TestIdempotency(unittest.TestCase):
         with open(self.input_file, 'w') as f:
             f.write(new_dna + "\n")
 
-        run_batch() # This should load the corrupted file, reset it to [], and add the new_dna
-
-        with open(self.json_output, 'r') as f:
-            data = json.load(f)
-
-        # Since VOL08900750712 was in the ledger, it was NOT re-processed.
-        # Only VOL00000000000 is in the new output.
-        self.assertEqual(len(data), 1)
-        self.assertEqual(data[0]['dna'], new_dna)
+        with self.assertRaises(DataIntegrityError):
+            run_batch()
 
 if __name__ == '__main__':
     unittest.main()
