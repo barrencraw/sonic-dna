@@ -10,6 +10,17 @@ sys.modules["PySide6.QtGui"] = mock_pyside6
 sys.modules["torch"] = MagicMock()
 sys.modules["torchaudio"] = MagicMock()
 sys.modules["sounddevice"] = MagicMock()
+sys.modules["numpy"] = MagicMock()
+
+# Mock scipy.io.wavfile correctly
+mock_scipy = MagicMock()
+mock_scipy_io = MagicMock()
+mock_scipy_io_wavfile = MagicMock()
+mock_scipy.io = mock_scipy_io
+mock_scipy_io.wavfile = mock_scipy_io_wavfile
+sys.modules["scipy"] = mock_scipy
+sys.modules["scipy.io"] = mock_scipy_io
+sys.modules["scipy.io.wavfile"] = mock_scipy_io_wavfile
 
 import unittest
 import os
@@ -98,15 +109,20 @@ class TestAtomicity(unittest.TestCase):
         # Force import after mocks
         if 'main' in sys.modules:
             del sys.modules['main']
-        import main
 
-        # We'll mock run_batch to fail
-        with patch('main.run_batch', side_effect=PersistenceError("Failed")):
-            with patch('main.clear_input_file') as mock_clear:
-                with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
-                    main.process_once()
+        # Path main.os.path.abspath to return our test_dir for base path construction
+        # and main.os.path.dirname to help it find the "script dir" correctly.
+        with patch('os.path.abspath', return_value=os.path.join(self.test_dir, 'main.py')):
+            with patch('os.path.dirname', return_value=self.test_dir):
+                import main
 
-                mock_clear.assert_not_called()
+                # We'll mock run_batch to fail
+                with patch('main.run_batch', side_effect=PersistenceError("Failed")):
+                    with patch('main.clear_input_file') as mock_clear:
+                        with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
+                            main.process_once()
+
+                        mock_clear.assert_not_called()
 
         # Verify file still has content
         with open(self.input_file, 'r') as f:
