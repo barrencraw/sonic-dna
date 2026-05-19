@@ -1,14 +1,32 @@
-import numpy as np
+try:
+    import numpy as np
+    HAS_NUMPY = True
+except ImportError:
+    HAS_NUMPY = False
+    np = None
+
 try:
     import sounddevice as sd
-except OSError:
+except (OSError, ImportError):
     sd = None
-from scipy.io.wavfile import write as write_wav
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFileDialog, QComboBox
-)
-from PySide6.QtGui import QPainter, QPen, QColor
+
+try:
+    from scipy.io.wavfile import write as write_wav
+    HAS_SCIPY = True
+except ImportError:
+    HAS_SCIPY = False
+    write_wav = None
+
+try:
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import (
+        QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFileDialog, QComboBox
+    )
+    from PySide6.QtGui import QPainter, QPen, QColor
+    HAS_PYSIDE = True
+except ImportError:
+    HAS_PYSIDE = False
+    class QWidget: pass
 
 SAMPLE_RATE = 44100
 DURATION = 2.0
