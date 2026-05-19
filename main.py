@@ -32,6 +32,7 @@ import sys
 import time
 import threading
 import argparse
+import uuid
 
 # ─── Import the batch parser and the GUI window ───────────────────────────────
 from utils.dna_ui import main as run_batch
@@ -45,11 +46,6 @@ def ensure_folder(path: str):
     """Create the folder if it doesn’t exist."""
     if not os.path.isdir(path):
         os.makedirs(path, exist_ok=True)
-
-def clear_input_file(path: str):
-    """Truncate (empty) the file at `path`."""
-    with open(path, 'w', encoding='utf-8'):
-        pass  # opening in 'w' mode clears the file
 
 def read_raw_contents(path: str) -> str:
     """
@@ -79,7 +75,7 @@ def watch_loop():
     input_file = os.path.join(raw_folder, 'toSequence.txt')
     last_content = ""
 
-    print("[Watcher] Started. Monitoring data/raw/toSequence.txt for new DNA lines…")
+    print("[Watcher] Started. Monitoring data/raw/toSequence.txt for new DNA sequences…")
     try:
         while True:
             current_content = read_raw_contents(input_file)
@@ -88,12 +84,11 @@ def watch_loop():
             if current_content.strip() and current_content != last_content:
                 timestamp = time.strftime('%Y-%m-%d %H:%M:%S')
                 print(f"[{timestamp}] New DNA detected → running parser…")
+                correlation_id = str(uuid.uuid4())
 
                 try:
-                    run_batch()
-                    # Only clear the input file if run_batch() succeeds
-                    clear_input_file(input_file)
-                    print(f"[{timestamp}] Parsing complete. Cleared toSequence.txt.\n")
+                    run_batch(correlation_id=correlation_id)
+                    print(f"[{timestamp}] Parsing complete.\n")
                 except Exception as e:
                     # Classify errors
                     from utils.dna_ui import DNAProcessingError
@@ -134,11 +129,12 @@ def process_once():
     input_file = os.path.join(raw_folder, 'toSequence.txt')
     if not os.path.isfile(input_file):
         print(f"[ERROR] Input file not found: {input_file}")
-        return
+        sys.exit(1)
 
-    print("[Once‐Runner] Processing all DNA strings once…")
+    print("[Once‐Runner] Processing all DNA sequences once…")
+    correlation_id = str(uuid.uuid4())
     try:
-        run_batch()
+        run_batch(correlation_id=correlation_id)
         print("[Once‐Runner] Done.")
     except Exception as e:
         from utils.dna_ui import DNAProcessingError
