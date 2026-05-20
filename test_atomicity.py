@@ -98,15 +98,19 @@ class TestAtomicity(unittest.TestCase):
         # Force import after mocks
         if 'main' in sys.modules:
             del sys.modules['main']
-        import main
 
-        # We'll mock run_batch to fail
-        with patch('main.run_batch', side_effect=PersistenceError("Failed")):
-            with patch('main.clear_input_file') as mock_clear:
-                with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
-                    main.process_once()
+        # Mocking os.path.dirname and os.path.abspath to point to our test_dir
+        with patch('os.path.abspath', return_value=self.test_dir):
+            with patch('os.path.dirname', return_value=self.test_dir):
+                import main
 
-                mock_clear.assert_not_called()
+                # We'll mock run_batch to fail
+                with patch('main.run_batch', side_effect=PersistenceError("Failed")):
+                    with patch('main.clear_input_file') as mock_clear:
+                        with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
+                            main.process_once()
+
+                    mock_clear.assert_not_called()
 
         # Verify file still has content
         with open(self.input_file, 'r') as f:
