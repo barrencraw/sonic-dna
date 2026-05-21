@@ -7,6 +7,10 @@ sys.modules["PySide6"] = mock_pyside6
 sys.modules["PySide6.QtWidgets"] = mock_pyside6
 sys.modules["PySide6.QtCore"] = mock_pyside6
 sys.modules["PySide6.QtGui"] = mock_pyside6
+sys.modules["numpy"] = MagicMock()
+sys.modules["scipy"] = MagicMock()
+sys.modules["scipy.io"] = MagicMock()
+sys.modules["scipy.io.wavfile"] = MagicMock()
 sys.modules["torch"] = MagicMock()
 sys.modules["torchaudio"] = MagicMock()
 sys.modules["sounddevice"] = MagicMock()
@@ -71,7 +75,15 @@ class TestAtomicity(unittest.TestCase):
 
     def test_crash_during_json_write(self):
         """Simulate a crash during JSON writing. No output files should be created."""
-        with patch('json.dump', side_effect=IOError("Disk Full")):
+        # Use a side effect that only raises if we're writing the main output files,
+        # otherwise we might block ledger or system state writes.
+        original_json_dump = json.dump
+        def json_dump_side_effect(data, f, **kwargs):
+            if hasattr(f, 'name') and ('output.json' in f.name or 'output.csv' in f.name):
+                raise IOError("Disk Full")
+            return original_json_dump(data, f, **kwargs)
+
+        with patch('json.dump', side_effect=json_dump_side_effect):
             with self.assertRaises(PersistenceError):
                 run_batch()
 
@@ -104,7 +116,7 @@ class TestAtomicity(unittest.TestCase):
         with patch('main.run_batch', side_effect=PersistenceError("Failed")):
             with patch('main.clear_input_file') as mock_clear:
                 with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
-                    main.process_once()
+                    main.process_once(base_dir=self.test_dir)
 
                 mock_clear.assert_not_called()
 
