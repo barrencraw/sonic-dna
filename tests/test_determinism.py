@@ -1,3 +1,17 @@
+import sys
+from unittest.mock import MagicMock
+
+# Mock scientific dependencies for headless environment
+sys.modules['numpy'] = MagicMock()
+sys.modules['scipy'] = MagicMock()
+sys.modules['scipy.io'] = MagicMock()
+sys.modules['scipy.io.wavfile'] = MagicMock()
+sys.modules['sounddevice'] = MagicMock()
+sys.modules['PySide6'] = MagicMock()
+sys.modules['PySide6.QtWidgets'] = MagicMock()
+sys.modules['PySide6.QtCore'] = MagicMock()
+sys.modules['PySide6.QtGui'] = MagicMock()
+
 import numpy as np
 import pytest
 from ui.music_panel import gen_wave

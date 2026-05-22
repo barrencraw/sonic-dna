@@ -71,7 +71,14 @@ class TestAtomicity(unittest.TestCase):
 
     def test_crash_during_json_write(self):
         """Simulate a crash during JSON writing. No output files should be created."""
-        with patch('json.dump', side_effect=IOError("Disk Full")):
+        # We need to selectively fail for output.json/csv, NOT system_state.json
+        original_dump = json.dump
+        def side_effect(obj, fp, **kwargs):
+            if hasattr(fp, 'name') and ('output.json' in fp.name or 'output.csv' in fp.name):
+                raise IOError("Disk Full")
+            return original_dump(obj, fp, **kwargs)
+
+        with patch('json.dump', side_effect=side_effect):
             with self.assertRaises(PersistenceError):
                 run_batch()
 
@@ -95,6 +102,18 @@ class TestAtomicity(unittest.TestCase):
 
     def test_watcher_behavior_on_failure(self):
         """Test main.py's logic: if run_batch fails, input file should NOT be cleared."""
+        # Force script_dir in main.py to be self.test_dir
+        # But script_dir is calculated as os.path.dirname(os.path.abspath(__file__))
+        # which will be /app/
+        # So we need to ensure the file exists at /app/data/raw/toSequence.txt? No, that's dangerous.
+
+        # main.py uses script_dir = os.path.dirname(os.path.abspath(__file__))
+        # then raw_folder = os.path.join(script_dir, 'data', 'raw')
+
+        # Create input file so process_once doesn't return early
+        with open(os.path.join(self.raw_dir, 'toSequence.txt'), 'w') as f:
+            f.write("V100")
+
         # Force import after mocks
         if 'main' in sys.modules:
             del sys.modules['main']
@@ -104,7 +123,7 @@ class TestAtomicity(unittest.TestCase):
         with patch('main.run_batch', side_effect=PersistenceError("Failed")):
             with patch('main.clear_input_file') as mock_clear:
                 with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
-                    main.process_once()
+                    main.process_once(base_dir=self.test_dir)
 
                 mock_clear.assert_not_called()
 
