@@ -1,14 +1,34 @@
-import numpy as np
+try:
+    import numpy as np
+    HAS_NUMPY = True
+except ImportError:
+    HAS_NUMPY = False
+    np = None
+
 try:
     import sounddevice as sd
-except OSError:
+except (ImportError, OSError):
     sd = None
-from scipy.io.wavfile import write as write_wav
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFileDialog, QComboBox
-)
-from PySide6.QtGui import QPainter, QPen, QColor
+
+try:
+    from scipy.io.wavfile import write as write_wav
+    HAS_SCIPY = True
+except ImportError:
+    HAS_SCIPY = False
+    write_wav = None
+
+try:
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import (
+        QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFileDialog, QComboBox
+    )
+    from PySide6.QtGui import QPainter, QPen, QColor
+    HAS_PYSIDE = True
+except ImportError:
+    HAS_PYSIDE = False
+    # Mocking for headless imports
+    class QWidget: pass
+    class WaveformWidget: pass
 
 SAMPLE_RATE = 44100
 DURATION = 2.0
@@ -40,6 +60,8 @@ BASE_SOUNDS = [
 ]
 
 def gen_wave(wave_type, volume=0.8, rng=None):
+    if not HAS_NUMPY:
+        return None
     t = np.linspace(0, DURATION, int(SAMPLE_RATE * DURATION), endpoint=False)
 
     if rng is None:
