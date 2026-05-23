@@ -1,8 +1,14 @@
-import numpy as np
+try:
+    import numpy as np
+    HAS_NUMPY = True
+except ImportError:
+    HAS_NUMPY = False
+
 import pytest
 from ui.music_panel import gen_wave
 from utils.providers import RngProvider
 
+@pytest.mark.skipif(not HAS_NUMPY, reason="numpy not available")
 @pytest.mark.parametrize("wave_type", [
     "Sample & Hold",
     "Stepped Random",
@@ -23,6 +29,7 @@ def test_deterministic_wave_generation(wave_type):
 
     assert np.array_equal(wave1, wave2), f"Waveform {wave_type} is not deterministic with seed {seed}"
 
+@pytest.mark.skipif(not HAS_NUMPY, reason="numpy not available")
 def test_different_seeds_produce_different_waves():
     wave_type = "White Noise"
     rng1 = RngProvider(seed=42)

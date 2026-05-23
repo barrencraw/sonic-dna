@@ -1,14 +1,39 @@
-import numpy as np
+try:
+    import numpy as np
+    HAS_NUMPY = True
+except ImportError:
+    HAS_NUMPY = False
+    np = None
+
 try:
     import sounddevice as sd
-except OSError:
+except (ImportError, OSError):
     sd = None
-from scipy.io.wavfile import write as write_wav
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFileDialog, QComboBox
-)
-from PySide6.QtGui import QPainter, QPen, QColor
+
+try:
+    from scipy.io.wavfile import write as write_wav
+    HAS_SCIPY = True
+except ImportError:
+    HAS_SCIPY = False
+
+try:
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import (
+        QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFileDialog, QComboBox
+    )
+    from PySide6.QtGui import QPainter, QPen, QColor
+    HAS_PYSIDE = True
+except ImportError:
+    HAS_PYSIDE = False
+    # Mock classes if needed for inheritance when PySide6 is missing
+    class QWidget:
+        def __init__(self, *args, **kwargs): pass
+    class QVBoxLayout: pass
+    class QHBoxLayout: pass
+    class QLabel: pass
+    class QPushButton: pass
+    class QFileDialog: pass
+    class QComboBox: pass
 
 SAMPLE_RATE = 44100
 DURATION = 2.0
@@ -40,6 +65,9 @@ BASE_SOUNDS = [
 ]
 
 def gen_wave(wave_type, volume=0.8, rng=None):
+    if not HAS_NUMPY:
+        return None
+
     t = np.linspace(0, DURATION, int(SAMPLE_RATE * DURATION), endpoint=False)
 
     if rng is None:
@@ -141,14 +169,27 @@ def gen_wave(wave_type, volume=0.8, rng=None):
 class WaveformWidget(QWidget):
     def __init__(self):
         super().__init__()
-        self.data = np.zeros(512)
-        self.setMinimumHeight(140)
+        if HAS_NUMPY:
+            self.data = np.zeros(512)
+        else:
+            self.data = [0] * 512
+        if HAS_PYSIDE:
+            self.setMinimumHeight(140)
 
     def set_wave(self, data):
-        self.data = data[:512] if len(data) > 512 else np.pad(data, (0, max(0, 512 - len(data))))
-        self.update()
+        if data is None:
+            if HAS_NUMPY: self.data = np.zeros(512)
+            else: self.data = [0] * 512
+        elif HAS_NUMPY:
+            self.data = data[:512] if len(data) > 512 else np.pad(data, (0, max(0, 512 - len(data))))
+        else:
+            self.data = data[:512]
+        if HAS_PYSIDE:
+            self.update()
 
     def paintEvent(self, event):
+        if not HAS_PYSIDE:
+            return
         qp = QPainter(self)
         qp.fillRect(event.rect(), Qt.black)
         w, h = self.width(), self.height()
@@ -166,6 +207,8 @@ class WaveformWidget(QWidget):
 class MusicPanel(QWidget):
     def __init__(self, rng=None):
         super().__init__()
+        if not HAS_PYSIDE:
+            return
         self.rng = rng
         layout = QVBoxLayout(self)
 
@@ -201,6 +244,7 @@ class MusicPanel(QWidget):
         self.update_waveform()  # Initialize display
 
     def update_waveform(self):
+        if not HAS_PYSIDE: return
         wave_type = self.sound_selector.currentText()
         data = gen_wave(wave_type, rng=self.rng)
         self.current_wave = data
@@ -209,6 +253,7 @@ class MusicPanel(QWidget):
             self.toggle_play()  # Stop if user changes wave while playing
 
     def toggle_play(self):
+        if not HAS_PYSIDE: return
         if not self.is_playing:
             self.is_playing = True
             self.play_btn.setText("Pause")
@@ -223,7 +268,8 @@ class MusicPanel(QWidget):
                 sd.stop()
 
     def download_wave(self):
-        if self.current_wave is not None:
+        if not HAS_PYSIDE: return
+        if self.current_wave is not None and HAS_SCIPY:
             file_path, _ = QFileDialog.getSaveFileName(self, "Save WAV File", "sound.wav", "WAV Files (*.wav)")
             if file_path:
                 # Normalize to 16-bit PCM for WAV export
