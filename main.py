@@ -36,8 +36,12 @@ import argparse
 # ─── Import the batch parser and the GUI window ───────────────────────────────
 from utils.dna_ui import main as run_batch
 from utils.providers import RngProvider
-from PySide6.QtWidgets import QApplication
-from ui.main_window import MainWindow
+try:
+    from PySide6.QtWidgets import QApplication
+    from ui.main_window import MainWindow
+    HAS_PYSIDE = True
+except ImportError:
+    HAS_PYSIDE = False
 
 # ─── UTILITY FUNCTIONS ────────────────────────────────────────────────────────
 
@@ -79,6 +83,7 @@ def watch_loop():
     input_file = os.path.join(raw_folder, 'toSequence.txt')
     last_content = ""
 
+    import uuid
     print("[Watcher] Started. Monitoring data/raw/toSequence.txt for new DNA lines…")
     try:
         while True:
@@ -88,9 +93,10 @@ def watch_loop():
             if current_content.strip() and current_content != last_content:
                 timestamp = time.strftime('%Y-%m-%d %H:%M:%S')
                 print(f"[{timestamp}] New DNA detected → running parser…")
+                correlation_id = uuid.uuid4()
 
                 try:
-                    run_batch()
+                    run_batch(correlation_id=correlation_id)
                     # Only clear the input file if run_batch() succeeds
                     clear_input_file(input_file)
                     print(f"[{timestamp}] Parsing complete. Cleared toSequence.txt.\n")
@@ -136,9 +142,11 @@ def process_once():
         print(f"[ERROR] Input file not found: {input_file}")
         return
 
+    import uuid
     print("[Once‐Runner] Processing all DNA strings once…")
+    correlation_id = uuid.uuid4()
     try:
-        run_batch()
+        run_batch(correlation_id=correlation_id)
         print("[Once‐Runner] Done.")
     except Exception as e:
         from utils.dna_ui import DNAProcessingError
@@ -178,6 +186,10 @@ def main():
     # Ensure working directory is project root
     script_dir = os.path.dirname(os.path.abspath(__file__))
     os.chdir(script_dir)
+
+    if not HAS_PYSIDE:
+        print("[ERROR] PySide6 not installed. GUI mode unavailable.")
+        sys.exit(1)
 
     app = QApplication(sys.argv)
 

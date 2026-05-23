@@ -100,13 +100,22 @@ class TestAtomicity(unittest.TestCase):
             del sys.modules['main']
         import main
 
-        # We'll mock run_batch to fail
-        with patch('main.run_batch', side_effect=PersistenceError("Failed")):
-            with patch('main.clear_input_file') as mock_clear:
-                with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
-                    main.process_once()
+        # Create input file in the current test_dir context
+        input_file = os.path.join(self.raw_dir, 'toSequence.txt')
+        with open(input_file, 'w') as f:
+            f.write("V100\n")
 
-                mock_clear.assert_not_called()
+        # We'll mock run_batch to fail
+        # We also need to patch os.path.dirname and os.path.abspath to point to our test_dir
+        # because process_once uses them to find the input file.
+        with patch('os.path.abspath', return_value=os.path.join(self.test_dir, 'main.py')):
+            with patch('main.run_batch', side_effect=PersistenceError("Failed")):
+                with patch('main.clear_input_file') as mock_clear:
+                    with patch('sys.exit') as mock_exit:
+                        main.process_once()
+                        mock_exit.assert_called_with(1)
+
+                    mock_clear.assert_not_called()
 
         # Verify file still has content
         with open(self.input_file, 'r') as f:
