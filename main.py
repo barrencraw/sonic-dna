@@ -32,11 +32,17 @@ import sys
 import time
 import threading
 import argparse
+import uuid
 
 # ─── Import the batch parser and the GUI window ───────────────────────────────
 from utils.dna_ui import main as run_batch
 from utils.providers import RngProvider
-from PySide6.QtWidgets import QApplication
+try:
+    from PySide6.QtWidgets import QApplication
+    HAS_PYSIDE = True
+except (ImportError, OSError):
+    HAS_PYSIDE = False
+
 from ui.main_window import MainWindow
 
 # ─── UTILITY FUNCTIONS ────────────────────────────────────────────────────────
@@ -63,16 +69,16 @@ def read_raw_contents(path: str) -> str:
 
 # ─── WATCHER LOOP ──────────────────────────────────────────────────────────────
 
-def watch_loop():
+def watch_loop(base_dir=None):
     """
     Continuously watch data/raw/toSequence.txt. Whenever new non‐empty content appears,
     run the batch parser and then clear toSequence.txt. Sleeps 1 second between checks.
     """
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    os.chdir(script_dir)
+    if base_dir is None:
+        base_dir = os.path.dirname(os.path.abspath(__file__))
 
-    raw_folder = os.path.join(script_dir, 'data', 'raw')
-    output_folder = os.path.join(script_dir, 'data', 'output')
+    raw_folder = os.path.join(base_dir, 'data', 'raw')
+    output_folder = os.path.join(base_dir, 'data', 'output')
     ensure_folder(raw_folder)
     ensure_folder(output_folder)
 
@@ -88,16 +94,20 @@ def watch_loop():
             if current_content.strip() and current_content != last_content:
                 timestamp = time.strftime('%Y-%m-%d %H:%M:%S')
                 print(f"[{timestamp}] New DNA detected → running parser…")
+                correlation_id = uuid.uuid4()
 
                 try:
-                    run_batch()
+                    run_batch(correlation_id=correlation_id, project_root=base_dir)
                     # Only clear the input file if run_batch() succeeds
                     clear_input_file(input_file)
                     print(f"[{timestamp}] Parsing complete. Cleared toSequence.txt.\n")
                 except Exception as e:
                     # Classify errors
-                    from utils.dna_ui import DNAProcessingError
-                    if isinstance(e, DNAProcessingError):
+                    from utils.dna_ui import DNAProcessingError, ThermalOverloadError
+                    if isinstance(e, ThermalOverloadError):
+                        print(f"[{timestamp}][Watcher][FATAL] Thermal Overload: {e}")
+                        print("[INFO] Dissipate heat by waiting or processing cooling cycles.")
+                    elif isinstance(e, DNAProcessingError):
                         print(f"[{timestamp}][Watcher][CRITICAL] DNA processing failed: {e}")
                     else:
                         print(f"[{timestamp}][Watcher][ERROR] Unexpected error: {e}")
@@ -118,16 +128,16 @@ def watch_loop():
 
 # ─── SINGLE‐RUN (NO GUI) MODE ──────────────────────────────────────────────────
 
-def process_once():
+def process_once(base_dir=None):
     """
     Run the batch parser exactly once (reads all lines from toSequence.txt,
     writes output JSON+CSV, then exits).
     """
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    os.chdir(script_dir)
+    if base_dir is None:
+        base_dir = os.path.dirname(os.path.abspath(__file__))
 
-    raw_folder = os.path.join(script_dir, 'data', 'raw')
-    output_folder = os.path.join(script_dir, 'data', 'output')
+    raw_folder = os.path.join(base_dir, 'data', 'raw')
+    output_folder = os.path.join(base_dir, 'data', 'output')
     ensure_folder(raw_folder)
     ensure_folder(output_folder)
 
@@ -138,11 +148,13 @@ def process_once():
 
     print("[Once‐Runner] Processing all DNA strings once…")
     try:
-        run_batch()
+        run_batch(project_root=base_dir)
         print("[Once‐Runner] Done.")
     except Exception as e:
-        from utils.dna_ui import DNAProcessingError
-        if isinstance(e, DNAProcessingError):
+        from utils.dna_ui import DNAProcessingError, ThermalOverloadError
+        if isinstance(e, ThermalOverloadError):
+            print(f"[Once‐Runner][FATAL] Thermal Overload: {e}")
+        elif isinstance(e, DNAProcessingError):
             print(f"[Once‐Runner][CRITICAL] DNA processing failed: {e}")
         else:
             print(f"[Once‐Runner][ERROR] Unexpected error: {e}")
@@ -174,11 +186,17 @@ def main():
     watcher_thread.start()
     print("[main.py] Watcher thread started in background.")
 
-    # Launch PySide6 GUI
-    # Ensure working directory is project root
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    os.chdir(script_dir)
+    if not HAS_PYSIDE:
+        print("[ERROR] PySide6 not found. Cannot launch GUI.")
+        # Keep the thread alive if only watcher is needed?
+        # But main script usually ends if GUI fails.
+        try:
+            while True:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            sys.exit(0)
 
+    # Launch PySide6 GUI
     app = QApplication(sys.argv)
 
     # Initialize Determinism Providers
