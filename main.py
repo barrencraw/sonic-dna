@@ -96,8 +96,19 @@ def watch_loop():
                     print(f"[{timestamp}] Parsing complete. Cleared toSequence.txt.\n")
                 except Exception as e:
                     # Classify errors
-                    from utils.dna_ui import DNAProcessingError
-                    if isinstance(e, DNAProcessingError):
+                    from utils.dna_ui import DNAProcessingError, ThermalOverloadError
+                    if isinstance(e, ThermalOverloadError):
+                        print(f"[{timestamp}][Watcher][FATAL] Thermal Overload. Core temperature exceeding safety limits.")
+                        print(f"[{timestamp}][Watcher][INFO] Dissipate heat. Cooling cycles required.")
+                        # We still clear the input file because the successfully processed ones are committed,
+                        # and the one that caused overload will stay in the ledger as 'unknown' or not exist,
+                        # but actually we should probably NOT clear it if we want the user to fix it?
+                        # Actually, dna_ui.main() commits what it could.
+                        # If we don't clear, we might loop forever if it's the first item.
+                        # The contract says: "Current item is NOT processed. Previous items in the same batch remain committed."
+                        # If we clear, the failing item is lost from the input.
+                        # Let's NOT clear if it's a thermal overload so the user can try again after cooling.
+                    elif isinstance(e, DNAProcessingError):
                         print(f"[{timestamp}][Watcher][CRITICAL] DNA processing failed: {e}")
                     else:
                         print(f"[{timestamp}][Watcher][ERROR] Unexpected error: {e}")
@@ -141,8 +152,11 @@ def process_once():
         run_batch()
         print("[Once‐Runner] Done.")
     except Exception as e:
-        from utils.dna_ui import DNAProcessingError
-        if isinstance(e, DNAProcessingError):
+        from utils.dna_ui import DNAProcessingError, ThermalOverloadError
+        if isinstance(e, ThermalOverloadError):
+            print(f"[Once‐Runner][FATAL] Thermal Overload. Core temperature exceeding safety limits.")
+            print(f"[Once‐Runner][INFO] Dissipate heat. Cooling cycles required.")
+        elif isinstance(e, DNAProcessingError):
             print(f"[Once‐Runner][CRITICAL] DNA processing failed: {e}")
         else:
             print(f"[Once‐Runner][ERROR] Unexpected error: {e}")

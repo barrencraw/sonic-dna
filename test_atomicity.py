@@ -71,9 +71,26 @@ class TestAtomicity(unittest.TestCase):
 
     def test_crash_during_json_write(self):
         """Simulate a crash during JSON writing. No output files should be created."""
-        with patch('json.dump', side_effect=IOError("Disk Full")):
-            with self.assertRaises(PersistenceError):
-                run_batch()
+        # Prepare input
+        input_file = os.path.join(self.raw_dir, 'toSequence.txt')
+        with open(input_file, 'w') as f:
+            f.write("V100\n")
+
+        # Use a more specific patch to avoid hitting the system state save
+        with patch('utils.dna_ui.tempfile.TemporaryDirectory') as mock_tmp:
+            mock_tmp.return_value.__enter__.return_value = self.output_dir
+            # We want json.dump to fail ONLY when writing the output, not the state.
+            # In utils/dna_ui.py, main() has a try block around atomic write.
+
+            orig_dump = json.dump
+            def side_effect(obj, fp, **kwargs):
+                if 'output.json' in str(fp) or 'output.csv' in str(fp):
+                     raise IOError("Disk Full")
+                return orig_dump(obj, fp, **kwargs)
+
+            with patch('json.dump', side_effect=side_effect):
+                 with self.assertRaises(PersistenceError):
+                    run_batch()
 
         json_out = os.path.join(self.output_dir, 'toSequence_parsed.json')
         csv_out = os.path.join(self.output_dir, 'toSequence_parsed.csv')
@@ -103,10 +120,28 @@ class TestAtomicity(unittest.TestCase):
         # We'll mock run_batch to fail
         with patch('main.run_batch', side_effect=PersistenceError("Failed")):
             with patch('main.clear_input_file') as mock_clear:
-                with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
-                    main.process_once()
+                # process_once() uses script_dir = os.path.dirname(os.path.abspath(__file__))
+                # In test_atomicity.py we mocked main to be sys.modules['main'].
+                # We need to make sure the file it looks for exists.
 
-                mock_clear.assert_not_called()
+                # Since we are in test_dir (self.test_dir), and process_once does:
+                # script_dir = os.path.dirname(os.path.abspath(__file__))
+                # but main.py is NOT in test_dir, it's in project_root.
+                # However, our 'import main' might be loading it from project_root.
+
+                # Let's patch os.path.abspath to return something in test_dir for main.py
+                with patch('os.path.abspath', return_value=os.path.join(self.test_dir, 'main.py')):
+                    # Now script_dir will be self.test_dir
+                    raw_dir = os.path.join(self.test_dir, 'data', 'raw')
+                    os.makedirs(raw_dir, exist_ok=True)
+                    input_file = os.path.join(raw_dir, 'toSequence.txt')
+                    with open(input_file, 'w') as f:
+                        f.write("V100\n")
+
+                    with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
+                        main.process_once()
+
+                    mock_clear.assert_not_called()
 
         # Verify file still has content
         with open(self.input_file, 'r') as f:
