@@ -36,8 +36,12 @@ import argparse
 # ─── Import the batch parser and the GUI window ───────────────────────────────
 from utils.dna_ui import main as run_batch
 from utils.providers import RngProvider
-from PySide6.QtWidgets import QApplication
-from ui.main_window import MainWindow
+try:
+    from PySide6.QtWidgets import QApplication
+    from ui.main_window import MainWindow
+    HAS_GUI = True
+except (ImportError, OSError):
+    HAS_GUI = False
 
 # ─── UTILITY FUNCTIONS ────────────────────────────────────────────────────────
 
@@ -96,8 +100,11 @@ def watch_loop():
                     print(f"[{timestamp}] Parsing complete. Cleared toSequence.txt.\n")
                 except Exception as e:
                     # Classify errors
-                    from utils.dna_ui import DNAProcessingError
-                    if isinstance(e, DNAProcessingError):
+                    from utils.dna_ui import DNAProcessingError, ThermalOverloadError
+                    if isinstance(e, ThermalOverloadError):
+                        print(f"[FATAL] Thermal Overload. Core temperature exceeding safety limits.")
+                        print(f"[INFO] Dissipate heat. Cooling cycles required.")
+                    elif isinstance(e, DNAProcessingError):
                         print(f"[{timestamp}][Watcher][CRITICAL] DNA processing failed: {e}")
                     else:
                         print(f"[{timestamp}][Watcher][ERROR] Unexpected error: {e}")
@@ -134,19 +141,24 @@ def process_once():
     input_file = os.path.join(raw_folder, 'toSequence.txt')
     if not os.path.isfile(input_file):
         print(f"[ERROR] Input file not found: {input_file}")
-        return
+        sys.exit(1)
 
     print("[Once‐Runner] Processing all DNA strings once…")
     try:
         run_batch()
         print("[Once‐Runner] Done.")
     except Exception as e:
-        from utils.dna_ui import DNAProcessingError
-        if isinstance(e, DNAProcessingError):
+        from utils.dna_ui import DNAProcessingError, ThermalOverloadError
+        if isinstance(e, ThermalOverloadError):
+            print(f"[FATAL] Thermal Overload. Core temperature exceeding safety limits.")
+            print(f"[INFO] Dissipate heat. Cooling cycles required.")
+            sys.exit(1)
+        elif isinstance(e, DNAProcessingError):
             print(f"[Once‐Runner][CRITICAL] DNA processing failed: {e}")
+            sys.exit(1)
         else:
             print(f"[Once‐Runner][ERROR] Unexpected error: {e}")
-        sys.exit(1)
+            sys.exit(1)
 
 # ─── MAIN ENTRYPOINT ───────────────────────────────────────────────────────────
 
@@ -167,6 +179,12 @@ def main():
     if args.once:
         # Run batch a single time, then exit
         process_once()
+        return
+
+    if not HAS_GUI:
+        print("[ERROR] PySide6 not available. Cannot launch GUI.")
+        print("        Starting watcher loop in foreground...")
+        watch_loop()
         return
 
     # Otherwise: start watcher, then launch GUI
