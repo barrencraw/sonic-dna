@@ -67,11 +67,12 @@ class TestAtomicity(unittest.TestCase):
         with open(json_out, 'r') as f:
             data = json.load(f)
             self.assertEqual(len(data), 1)
-            self.assertEqual(data[0]['dna'], 'V100')
+            self.assertEqual(data[0]['dna_sequence'], 'V100')
 
     def test_crash_during_json_write(self):
         """Simulate a crash during JSON writing. No output files should be created."""
-        with patch('json.dump', side_effect=IOError("Disk Full")):
+        # Simulate failure during the atomic commit phase
+        with patch('os.replace', side_effect=PersistenceError("Disk Full")):
             with self.assertRaises(PersistenceError):
                 run_batch()
 
