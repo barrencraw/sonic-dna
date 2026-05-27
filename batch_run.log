@@ -1,0 +1,7 @@
+[Idempotency] key=VOL08900750712 dedupe_hit=False terminal_outcome=processing
+[Idempotency] key=VOL08900750712 dedupe_hit=False terminal_outcome=success
+[OK] Processed 1 new DNA strings. Total in ledger: 1
+     JSON → /app/data/output/toSequence_parsed.json
+     CSV  → /app/data/output/toSequence_parsed.csv
+[Idempotency] key=VOL08900750712 dedupe_hit=True terminal_outcome=success
+[OK] No new DNA strings to process.
