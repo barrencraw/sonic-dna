@@ -60,26 +60,37 @@ class TestAtomicity(unittest.TestCase):
 
         json_out = os.path.join(self.output_dir, 'toSequence_parsed.json')
         csv_out = os.path.join(self.output_dir, 'toSequence_parsed.csv')
+        ledger_out = os.path.join(self.data_dir, 'processed_ledger.json')
 
         self.assertTrue(os.path.exists(json_out))
         self.assertTrue(os.path.exists(csv_out))
+        self.assertTrue(os.path.exists(ledger_out))
 
         with open(json_out, 'r') as f:
             data = json.load(f)
             self.assertEqual(len(data), 1)
             self.assertEqual(data[0]['dna'], 'V100')
 
+        with open(ledger_out, 'r') as f:
+            ledger = json.load(f)
+            self.assertIn('V100', ledger)
+            self.assertEqual(ledger['V100']['terminal_outcome'], 'success')
+
     def test_crash_during_json_write(self):
-        """Simulate a crash during JSON writing. No output files should be created."""
+        """Simulate a crash during JSON writing. No output files or ledger should be created."""
+        # Use a more specific patch to avoid impacting other things if possible,
+        # but json.dump is what we use.
         with patch('json.dump', side_effect=IOError("Disk Full")):
             with self.assertRaises(PersistenceError):
                 run_batch()
 
         json_out = os.path.join(self.output_dir, 'toSequence_parsed.json')
         csv_out = os.path.join(self.output_dir, 'toSequence_parsed.csv')
+        ledger_out = os.path.join(self.data_dir, 'processed_ledger.json')
 
         self.assertFalse(os.path.exists(json_out))
         self.assertFalse(os.path.exists(csv_out))
+        self.assertFalse(os.path.exists(ledger_out))
 
     def test_crash_during_rename(self):
         """Simulate a crash/failure during the atomic rename. No output files should be created/updated."""
@@ -89,28 +100,55 @@ class TestAtomicity(unittest.TestCase):
 
         json_out = os.path.join(self.output_dir, 'toSequence_parsed.json')
         csv_out = os.path.join(self.output_dir, 'toSequence_parsed.csv')
+        ledger_out = os.path.join(self.data_dir, 'processed_ledger.json')
 
         self.assertFalse(os.path.exists(json_out))
         self.assertFalse(os.path.exists(csv_out))
+        self.assertFalse(os.path.exists(ledger_out))
 
     def test_watcher_behavior_on_failure(self):
         """Test main.py's logic: if run_batch fails, input file should NOT be cleared."""
         # Force import after mocks
         if 'main' in sys.modules:
             del sys.modules['main']
-        import main
 
-        # We'll mock run_batch to fail
-        with patch('main.run_batch', side_effect=PersistenceError("Failed")):
-            with patch('main.clear_input_file') as mock_clear:
-                with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
-                    main.process_once()
+        # Mock providers and MainWindow to avoid dependency issues when importing main
+        with patch('utils.providers.RngProvider'), \
+             patch('ui.main_window.MainWindow'):
+            import main
 
-                mock_clear.assert_not_called()
+            # Mock os.chdir to prevent main.py from escaping our test directory
+            # and mock os.path.dirname to point to our test directory
+            with patch('os.chdir'), \
+                 patch('os.path.dirname', return_value=self.test_dir), \
+                 patch('main.run_batch', side_effect=PersistenceError("Failed")):
+
+                with patch('main.clear_input_file') as mock_clear:
+                    with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
+                        main.process_once()
+
+                    mock_clear.assert_not_called()
 
         # Verify file still has content
         with open(self.input_file, 'r') as f:
             self.assertEqual(f.read().strip(), "V100")
+
+    def test_idempotency_on_double_invocation(self):
+        """Verify that double invocation does not process the same DNA twice."""
+        # 1. Process once
+        run_batch()
+
+        json_out = os.path.join(self.output_dir, 'toSequence_parsed.json')
+        with open(json_out, 'r') as f:
+            data = json.load(f)
+        self.assertEqual(len(data), 1)
+
+        # 2. Process again (same input file)
+        run_batch()
+
+        with open(json_out, 'r') as f:
+            data = json.load(f)
+        self.assertEqual(len(data), 1, "Should not have added a second entry for the same DNA")
 
 if __name__ == '__main__':
     unittest.main()
