@@ -50,6 +50,15 @@ class RuleLoadError(DNAProcessingError):
 class PersistenceError(DNAProcessingError):
     """Raised when writing or moving output files fails."""
     pass
+
+class ThermalOverloadError(DNAProcessingError):
+    """Raised when system heat exceeds safety limits."""
+    pass
+
+NOISE_THRESHOLD = 7.0
+OVERLOAD_THRESHOLD = 10.0
+COOLING_RATE = 0.0083  # units per second (~1 unit every 2 minutes)
+
 def load_ledger(ledger_path):
     if os.path.exists(ledger_path):
         try:
@@ -62,6 +71,36 @@ def load_ledger(ledger_path):
 def save_ledger(ledger_path, ledger):
     with open(ledger_path, 'w', encoding='utf-8') as f:
         json.dump(ledger, f, indent=2)
+
+def load_system_state(state_path):
+    if os.path.exists(state_path):
+        try:
+            with open(state_path, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {"system_heat": 0.0, "last_update": time.time()}
+
+def save_system_state(state_path, state):
+    ensure_folder(os.path.dirname(state_path))
+    with open(state_path, 'w', encoding='utf-8') as f:
+        json.dump(state, f, indent=2)
+
+def calculate_heat_delta(result):
+    # Base heat for any process
+    gain = 0.1
+    # Specific rules might be more taxing
+    if result.get('rule') == 'Volume':
+        gain += 0.2
+    return gain
+
+def apply_thermal_noise(values):
+    """Recursively scale numeric values by 0.9."""
+    if isinstance(values, dict):
+        return {k: apply_thermal_noise(v) for k, v in values.items()}
+    elif isinstance(values, (int, float)) and not isinstance(values, bool):
+        return values * 0.9
+    return values
 
 def main():
     # Determine file paths
@@ -94,6 +133,15 @@ def main():
 
     ledger = load_ledger(ledger_path)
 
+    # Load system state and apply cooling
+    state_path = os.path.join(project_root, 'data', 'system_state.json')
+    state = load_system_state(state_path)
+    now = time.time()
+    elapsed = now - state['last_update']
+    cooling = elapsed * COOLING_RATE
+    state['system_heat'] = max(0.0, state['system_heat'] - cooling)
+    state['last_update'] = now
+
     # 1) Load existing JSON output
     json_output_path = os.path.join(output_folder, 'toSequence_parsed.json')
     parsed_json = []
@@ -123,6 +171,8 @@ def main():
     from utils.dna_calculator import RuleParseError
 
     new_processed_count = 0
+    thermal_overload_triggered = False
+
     for dna_str in dna_list:
         idempotency_key = dna_str
         if idempotency_key in ledger:
@@ -133,6 +183,23 @@ def main():
 
         try:
             result = calculator.parse(dna_str)
+
+            # Thermal Logic: check for overload before processing
+            gain = calculate_heat_delta(result)
+            if state['system_heat'] + gain > OVERLOAD_THRESHOLD:
+                print(f"[FATAL] Thermal Overload. Core temperature exceeding safety limits. Current: {state['system_heat']:.2f}, Gain: {gain:.2f}")
+                print(f"[INFO] Dissipate heat. Cooling cycles required.")
+                thermal_overload_triggered = True
+                break
+
+            # Thermal Logic: apply noise if above threshold
+            if state['system_heat'] > NOISE_THRESHOLD:
+                print(f"[WARN] Thermal Noise detected. Fidelity degradation active. Heat: {state['system_heat']:.2f}")
+                result['values'] = apply_thermal_noise(result['values'])
+
+            # Update heat
+            state['system_heat'] += gain
+
             entry = {
                 'dna': dna_str,
                 'rule': result['rule'],
@@ -159,6 +226,16 @@ def main():
             csv_rows.append(flat)
             all_flattened_keys.update(flat.keys())
             outcome = f"error: {str(e)}"
+
+        ledger[idempotency_key] = {
+            'terminal_outcome': outcome,
+            'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
+        }
+        print(f"[Idempotency] key={idempotency_key} dedupe_hit=False terminal_outcome={outcome}")
+        new_processed_count += 1
+
+    # Save system state
+    save_system_state(state_path, state)
 
     # ATOMIC WRITE PATTERN:
     # 1. Write to a temporary directory in the same filesystem as the output folder
@@ -199,34 +276,17 @@ def main():
             raise PersistenceError("Failed to write output files atomically") from e
 
     print(f"[OK] Parsed {len(dna_list)} DNA strings.")
-        ledger[idempotency_key] = {
-            'terminal_outcome': outcome,
-            'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
-        }
-        print(f"[Idempotency] key={idempotency_key} dedupe_hit=False terminal_outcome={outcome}")
-        new_processed_count += 1
 
     if new_processed_count > 0:
         # Save ledger
         save_ledger(ledger_path, ledger)
 
-        # Write JSON output
-        with open(json_output_path, 'w', encoding='utf-8') as jf:
-            json.dump(parsed_json, jf, indent=2)
-
-        # Write CSV output
-        fieldnames = sorted(all_flattened_keys)
-        with open(csv_output_path, 'w', newline='', encoding='utf-8') as cf:
-            writer = csv.DictWriter(cf, fieldnames=fieldnames)
-            writer.writeheader()
-            for row in csv_rows:
-                # Ensure every field in fieldnames
-                out = {k: row.get(k, '') for k in fieldnames}
-                writer.writerow(out)
-
     print(f"[OK] Processed {new_processed_count} new DNA strings. Total in ledger: {len(ledger)}")
     print(f"     JSON → {json_output_path}")
     print(f"     CSV  → {csv_output_path}")
+
+    if thermal_overload_triggered:
+        raise ThermalOverloadError(f"Thermal Overload at {state['system_heat']:.2f}")
 
 if __name__ == '__main__':
     main()
