@@ -1,9 +1,18 @@
-import numpy as np
+try:
+    import numpy as np
+except ImportError:
+    np = None
+
 try:
     import sounddevice as sd
-except OSError:
+except (ImportError, OSError):
     sd = None
-from scipy.io.wavfile import write as write_wav
+
+try:
+    from scipy.io.wavfile import write as write_wav
+except ImportError:
+    write_wav = None
+
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFileDialog, QComboBox
@@ -40,6 +49,9 @@ BASE_SOUNDS = [
 ]
 
 def gen_wave(wave_type, volume=0.8, rng=None):
+    if np is None:
+        return None
+
     t = np.linspace(0, DURATION, int(SAMPLE_RATE * DURATION), endpoint=False)
 
     if rng is None:
@@ -90,6 +102,8 @@ def gen_wave(wave_type, volume=0.8, rng=None):
         steps = 32
         step_len = len(t) // steps
         vals = rng.uniform(-1, 1, steps)
+        if isinstance(vals, list):
+            vals = np.array(vals)
         data = np.repeat(vals, step_len)
         data = np.pad(data, (0, len(t) - len(data)))
         return volume * data
@@ -97,26 +111,36 @@ def gen_wave(wave_type, volume=0.8, rng=None):
         steps = 16
         idx = np.floor(np.linspace(0, steps, len(t))).astype(int)
         vals = rng.uniform(-1, 1, steps+1)
+        if isinstance(vals, list):
+            vals = np.array(vals)
         return volume * vals[idx]
     elif wave_type == "Linear Chirp":
         f0, f1 = 220, 1760
         chirp = np.sin(2 * np.pi * (f0 + (f1 - f0) * t / DURATION / 2) * t)
         return volume * chirp
     elif wave_type == "White Noise":
-        return volume * rng.uniform(-1, 1, len(t))
+        vals = rng.uniform(-1, 1, len(t))
+        if isinstance(vals, list):
+            vals = np.array(vals)
+        return volume * vals
     elif wave_type == "Pink Noise":
         nrows, ncols = 16, len(t)
-        array = rng.standard_normal((nrows, ncols))
+        # standard_normal fallbacks might be expensive as list
+        array = rng.standard_normal((nrows, ncols)) if hasattr(rng, '_rng') and hasattr(rng._rng, 'standard_normal') else np.random.standard_normal((nrows, ncols))
         array = np.cumsum(array, axis=0)
         pink = array[-1] / np.max(np.abs(array[-1]))
         return volume * pink
     elif wave_type == "Brown Noise":
         wn = rng.uniform(-1, 1, len(t))
+        if isinstance(wn, list):
+            wn = np.array(wn)
         brown = np.cumsum(wn)
         brown = brown / np.max(np.abs(brown))
         return volume * brown
     elif wave_type == "Blue Noise":
         white = rng.normal(0, 1, len(t))
+        if isinstance(white, list):
+            white = np.array(white)
         fft = np.fft.rfft(white)
         freqs = np.fft.rfftfreq(len(white), 1 / SAMPLE_RATE)
         fft *= np.sqrt(freqs)
@@ -125,6 +149,8 @@ def gen_wave(wave_type, volume=0.8, rng=None):
         return volume * blue
     elif wave_type == "Violet Noise":
         white = rng.normal(0, 1, len(t))
+        if isinstance(white, list):
+            white = np.array(white)
         fft = np.fft.rfft(white)
         freqs = np.fft.rfftfreq(len(white), 1 / SAMPLE_RATE)
         fft *= freqs
@@ -133,6 +159,8 @@ def gen_wave(wave_type, volume=0.8, rng=None):
         return volume * violet
     elif wave_type == "Grey Noise":
         white = rng.normal(0, 1, len(t))
+        if isinstance(white, list):
+            white = np.array(white)
         eq_curve = np.linspace(0.6, 1.2, len(white))
         return volume * (white * eq_curve / np.max(np.abs(white * eq_curve)))
     else:
@@ -141,11 +169,19 @@ def gen_wave(wave_type, volume=0.8, rng=None):
 class WaveformWidget(QWidget):
     def __init__(self):
         super().__init__()
-        self.data = np.zeros(512)
+        if np is not None:
+            self.data = np.zeros(512)
+        else:
+            self.data = [0]*512
         self.setMinimumHeight(140)
 
     def set_wave(self, data):
-        self.data = data[:512] if len(data) > 512 else np.pad(data, (0, max(0, 512 - len(data))))
+        if data is None:
+            return
+        if np is not None:
+            self.data = data[:512] if len(data) > 512 else np.pad(data, (0, max(0, 512 - len(data))))
+        else:
+            self.data = data[:512]
         self.update()
 
     def paintEvent(self, event):
@@ -210,6 +246,9 @@ class MusicPanel(QWidget):
 
     def toggle_play(self):
         if not self.is_playing:
+            if self.current_wave is None:
+                print("No waveform data to play.")
+                return
             self.is_playing = True
             self.play_btn.setText("Pause")
             if sd:
@@ -223,9 +262,11 @@ class MusicPanel(QWidget):
                 sd.stop()
 
     def download_wave(self):
-        if self.current_wave is not None:
+        if self.current_wave is not None and np is not None and write_wav is not None:
             file_path, _ = QFileDialog.getSaveFileName(self, "Save WAV File", "sound.wav", "WAV Files (*.wav)")
             if file_path:
                 # Normalize to 16-bit PCM for WAV export
                 audio = (self.current_wave * 32767).astype(np.int16)
                 write_wav(file_path, SAMPLE_RATE, audio)
+        else:
+            print("Download not available (missing numpy, scipy, or no wave).")
