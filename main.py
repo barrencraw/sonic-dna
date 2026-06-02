@@ -32,9 +32,10 @@ import sys
 import time
 import threading
 import argparse
+import uuid
 
 # ─── Import the batch parser and the GUI window ───────────────────────────────
-from utils.dna_ui import main as run_batch
+from utils.dna_ui import main as run_batch, ThermalOverloadError
 from utils.providers import RngProvider
 from PySide6.QtWidgets import QApplication
 from ui.main_window import MainWindow
@@ -89,15 +90,19 @@ def watch_loop():
                 timestamp = time.strftime('%Y-%m-%d %H:%M:%S')
                 print(f"[{timestamp}] New DNA detected → running parser…")
 
+                correlation_id = str(uuid.uuid4())
                 try:
-                    run_batch()
+                    run_batch(correlation_id=correlation_id)
                     # Only clear the input file if run_batch() succeeds
                     clear_input_file(input_file)
                     print(f"[{timestamp}] Parsing complete. Cleared toSequence.txt.\n")
                 except Exception as e:
                     # Classify errors
                     from utils.dna_ui import DNAProcessingError
-                    if isinstance(e, DNAProcessingError):
+                    if isinstance(e, ThermalOverloadError):
+                        print(f"[{timestamp}][Watcher][FATAL] {e}")
+                        print(f"[{timestamp}][Watcher][HINT] Dissipate heat. Cooling cycles required.")
+                    elif isinstance(e, DNAProcessingError):
                         print(f"[{timestamp}][Watcher][CRITICAL] DNA processing failed: {e}")
                     else:
                         print(f"[{timestamp}][Watcher][ERROR] Unexpected error: {e}")
@@ -118,12 +123,15 @@ def watch_loop():
 
 # ─── SINGLE‐RUN (NO GUI) MODE ──────────────────────────────────────────────────
 
-def process_once():
+def process_once(base_dir=None):
     """
     Run the batch parser exactly once (reads all lines from toSequence.txt,
     writes output JSON+CSV, then exits).
     """
-    script_dir = os.path.dirname(os.path.abspath(__file__))
+    if base_dir:
+        script_dir = base_dir
+    else:
+        script_dir = os.path.dirname(os.path.abspath(__file__))
     os.chdir(script_dir)
 
     raw_folder = os.path.join(script_dir, 'data', 'raw')
@@ -137,15 +145,24 @@ def process_once():
         return
 
     print("[Once‐Runner] Processing all DNA strings once…")
+    correlation_id = str(uuid.uuid4())
     try:
-        run_batch()
+        run_batch(correlation_id=correlation_id)
         print("[Once‐Runner] Done.")
     except Exception as e:
+        # Re-raise so tests can catch it or we can exit with 1
         from utils.dna_ui import DNAProcessingError
-        if isinstance(e, DNAProcessingError):
+        if isinstance(e, ThermalOverloadError):
+            print(f"[Once‐Runner][FATAL] {e}")
+            print(f"[Once‐Runner][HINT] Dissipate heat. Cooling cycles required.")
+        elif isinstance(e, DNAProcessingError):
             print(f"[Once‐Runner][CRITICAL] DNA processing failed: {e}")
         else:
             print(f"[Once‐Runner][ERROR] Unexpected error: {e}")
+
+        # If we are in a test environment, just re-raise
+        if 'unittest' in sys.modules:
+            raise
         sys.exit(1)
 
 # ─── MAIN ENTRYPOINT ───────────────────────────────────────────────────────────
