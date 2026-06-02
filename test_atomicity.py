@@ -10,6 +10,10 @@ sys.modules["PySide6.QtGui"] = mock_pyside6
 sys.modules["torch"] = MagicMock()
 sys.modules["torchaudio"] = MagicMock()
 sys.modules["sounddevice"] = MagicMock()
+sys.modules["numpy"] = MagicMock()
+sys.modules["scipy"] = MagicMock()
+sys.modules["scipy.io"] = MagicMock()
+sys.modules["scipy.io.wavfile"] = MagicMock()
 
 import unittest
 import os
@@ -67,7 +71,7 @@ class TestAtomicity(unittest.TestCase):
         with open(json_out, 'r') as f:
             data = json.load(f)
             self.assertEqual(len(data), 1)
-            self.assertEqual(data[0]['dna'], 'V100')
+            self.assertEqual(data[0]['dna_sequence'], 'V100')
 
     def test_crash_during_json_write(self):
         """Simulate a crash during JSON writing. No output files should be created."""
@@ -98,15 +102,28 @@ class TestAtomicity(unittest.TestCase):
         # Force import after mocks
         if 'main' in sys.modules:
             del sys.modules['main']
+
+        # We need to ensure that when main.py looks for data/raw/toSequence.txt, it finds it.
+        # Since main.py uses os.path.dirname(os.path.abspath(__file__)), and we are in a temp dir,
+        # it might look in the wrong place if we don't mock that or ensure the pathing.
+
         import main
 
-        # We'll mock run_batch to fail
+        # Patch main.os.path.isfile to return True for our input file if requested
+        # Actually, process_once uses script_dir which is based on main.py's __file__
+
         with patch('main.run_batch', side_effect=PersistenceError("Failed")):
             with patch('main.clear_input_file') as mock_clear:
-                with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
-                    main.process_once()
+                # We need to make sure process_once finds the file.
+                # In main.py: input_file = os.path.join(raw_folder, 'toSequence.txt')
+                # raw_folder = os.path.join(script_dir, 'data', 'raw')
 
-                mock_clear.assert_not_called()
+                # Let's patch script_dir inside process_once
+                with patch('os.path.isfile', return_value=True):
+                    with self.assertRaises(SystemExit):
+                        main.process_once()
+
+                    mock_clear.assert_not_called()
 
         # Verify file still has content
         with open(self.input_file, 'r') as f:
