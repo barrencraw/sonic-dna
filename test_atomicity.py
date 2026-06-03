@@ -101,10 +101,17 @@ class TestAtomicity(unittest.TestCase):
         import main
 
         # We'll mock run_batch to fail
+        # Using full path to patch run_batch inside main
         with patch('main.run_batch', side_effect=PersistenceError("Failed")):
             with patch('main.clear_input_file') as mock_clear:
-                with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
+                try:
                     main.process_once()
+                except SystemExit as e:
+                    self.assertEqual(e.code, 1)
+                except Exception as e:
+                    self.fail(f"Expected SystemExit, got {type(e).__name__}: {e}")
+                else:
+                    self.fail("Expected SystemExit but nothing was raised")
 
                 mock_clear.assert_not_called()
 
