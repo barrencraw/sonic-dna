@@ -103,7 +103,7 @@ class TestAtomicity(unittest.TestCase):
         # We'll mock run_batch to fail
         with patch('main.run_batch', side_effect=PersistenceError("Failed")):
             with patch('main.clear_input_file') as mock_clear:
-                with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
+                with self.assertRaises(SystemExit):
                     main.process_once()
 
                 mock_clear.assert_not_called()
