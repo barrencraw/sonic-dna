@@ -2,14 +2,21 @@ import sys
 from unittest.mock import MagicMock
 
 # Mock dependencies before any imports
-mock_pyside6 = MagicMock()
-sys.modules["PySide6"] = mock_pyside6
-sys.modules["PySide6.QtWidgets"] = mock_pyside6
-sys.modules["PySide6.QtCore"] = mock_pyside6
-sys.modules["PySide6.QtGui"] = mock_pyside6
+# Ensure we don't mock modules that are already loaded correctly if possible
+if "numpy" in sys.modules: del sys.modules["numpy"]
+if "scipy" in sys.modules: del sys.modules["scipy"]
+if "scipy.io.wavfile" in sys.modules: del sys.modules["scipy.io.wavfile"]
+
+sys.modules["PySide6"] = MagicMock()
+sys.modules["PySide6.QtWidgets"] = MagicMock()
+sys.modules["PySide6.QtCore"] = MagicMock()
+sys.modules["PySide6.QtGui"] = MagicMock()
 sys.modules["torch"] = MagicMock()
 sys.modules["torchaudio"] = MagicMock()
 sys.modules["sounddevice"] = MagicMock()
+sys.modules["numpy"] = MagicMock()
+sys.modules["scipy"] = MagicMock()
+sys.modules["scipy.io.wavfile"] = MagicMock()
 
 import unittest
 import os
@@ -56,7 +63,7 @@ class TestAtomicity(unittest.TestCase):
 
     def test_successful_parsing(self):
         """Verify that parsing works correctly under normal conditions."""
-        run_batch()
+        run_batch(base_dir=self.test_dir)
 
         json_out = os.path.join(self.output_dir, 'toSequence_parsed.json')
         csv_out = os.path.join(self.output_dir, 'toSequence_parsed.csv')
@@ -67,13 +74,13 @@ class TestAtomicity(unittest.TestCase):
         with open(json_out, 'r') as f:
             data = json.load(f)
             self.assertEqual(len(data), 1)
-            self.assertEqual(data[0]['dna'], 'V100')
+            self.assertEqual(data[0]['dna_sequence'], 'V100')
 
     def test_crash_during_json_write(self):
         """Simulate a crash during JSON writing. No output files should be created."""
         with patch('json.dump', side_effect=IOError("Disk Full")):
             with self.assertRaises(PersistenceError):
-                run_batch()
+                run_batch(base_dir=self.test_dir)
 
         json_out = os.path.join(self.output_dir, 'toSequence_parsed.json')
         csv_out = os.path.join(self.output_dir, 'toSequence_parsed.csv')
@@ -85,7 +92,7 @@ class TestAtomicity(unittest.TestCase):
         """Simulate a crash/failure during the atomic rename. No output files should be created/updated."""
         with patch('os.replace', side_effect=OSError("Permission Denied")):
             with self.assertRaises(PersistenceError):
-                run_batch()
+                run_batch(base_dir=self.test_dir)
 
         json_out = os.path.join(self.output_dir, 'toSequence_parsed.json')
         csv_out = os.path.join(self.output_dir, 'toSequence_parsed.csv')
@@ -104,7 +111,7 @@ class TestAtomicity(unittest.TestCase):
         with patch('main.run_batch', side_effect=PersistenceError("Failed")):
             with patch('main.clear_input_file') as mock_clear:
                 with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
-                    main.process_once()
+                    main.process_once(base_dir=self.test_dir)
 
                 mock_clear.assert_not_called()
 
