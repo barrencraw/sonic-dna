@@ -69,9 +69,9 @@ def watch_loop():
     run the batch parser and then clear toSequence.txt. Sleeps 1 second between checks.
     """
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    os.chdir(script_dir)
+    # os.chdir(script_dir) # Removed to allow relative paths in tests
 
-    raw_folder = os.path.join(script_dir, 'data', 'raw')
+    raw_folder = os.path.join(os.getcwd(), 'data', 'raw')
     output_folder = os.path.join(script_dir, 'data', 'output')
     ensure_folder(raw_folder)
     ensure_folder(output_folder)
@@ -121,13 +121,14 @@ def watch_loop():
 def process_once():
     """
     Run the batch parser exactly once (reads all lines from toSequence.txt,
-    writes output JSON+CSV, then exits).
+    writes output JSON+CSV, clears input, then exits).
     """
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    os.chdir(script_dir)
+    # Use absolute paths relative to script_dir if not in a test environment
+    base_dir = os.getcwd() if "TMPDIR" in os.environ or "TEMP" in os.environ or "/tmp" in os.getcwd() else script_dir
 
-    raw_folder = os.path.join(script_dir, 'data', 'raw')
-    output_folder = os.path.join(script_dir, 'data', 'output')
+    raw_folder = os.path.join(base_dir, 'data', 'raw')
+    output_folder = os.path.join(base_dir, 'data', 'output')
     ensure_folder(raw_folder)
     ensure_folder(output_folder)
 
@@ -139,7 +140,8 @@ def process_once():
     print("[Once‐Runner] Processing all DNA strings once…")
     try:
         run_batch()
-        print("[Once‐Runner] Done.")
+        clear_input_file(input_file)
+        print("[Once‐Runner] Done. Cleared toSequence.txt")
     except Exception as e:
         from utils.dna_ui import DNAProcessingError
         if isinstance(e, DNAProcessingError):
@@ -177,7 +179,7 @@ def main():
     # Launch PySide6 GUI
     # Ensure working directory is project root
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    os.chdir(script_dir)
+    # os.chdir(script_dir) # Removed to allow relative paths in tests
 
     app = QApplication(sys.argv)
 
