@@ -10,6 +10,10 @@ sys.modules["PySide6.QtGui"] = mock_pyside6
 sys.modules["torch"] = MagicMock()
 sys.modules["torchaudio"] = MagicMock()
 sys.modules["sounddevice"] = MagicMock()
+sys.modules["numpy"] = MagicMock()
+sys.modules["scipy"] = MagicMock()
+sys.modules["scipy.io"] = MagicMock()
+sys.modules["scipy.io.wavfile"] = MagicMock()
 
 import unittest
 import os
@@ -33,6 +37,8 @@ class TestAtomicity(unittest.TestCase):
         os.makedirs(self.rules_dir)
 
         self.input_file = os.path.join(self.raw_dir, 'toSequence.txt')
+        self.ledger_file = os.path.join(self.data_dir, 'processed_ledger.json')
+
         with open(self.input_file, 'w') as f:
             f.write("V100\n")
 
@@ -63,6 +69,7 @@ class TestAtomicity(unittest.TestCase):
 
         self.assertTrue(os.path.exists(json_out))
         self.assertTrue(os.path.exists(csv_out))
+        self.assertTrue(os.path.exists(self.ledger_file))
 
         with open(json_out, 'r') as f:
             data = json.load(f)
@@ -80,6 +87,7 @@ class TestAtomicity(unittest.TestCase):
 
         self.assertFalse(os.path.exists(json_out))
         self.assertFalse(os.path.exists(csv_out))
+        self.assertFalse(os.path.exists(self.ledger_file))
 
     def test_crash_during_rename(self):
         """Simulate a crash/failure during the atomic rename. No output files should be created/updated."""
@@ -92,6 +100,7 @@ class TestAtomicity(unittest.TestCase):
 
         self.assertFalse(os.path.exists(json_out))
         self.assertFalse(os.path.exists(csv_out))
+        self.assertFalse(os.path.exists(self.ledger_file))
 
     def test_watcher_behavior_on_failure(self):
         """Test main.py's logic: if run_batch fails, input file should NOT be cleared."""
@@ -100,17 +109,66 @@ class TestAtomicity(unittest.TestCase):
             del sys.modules['main']
         import main
 
-        # We'll mock run_batch to fail
-        with patch('main.run_batch', side_effect=PersistenceError("Failed")):
-            with patch('main.clear_input_file') as mock_clear:
-                with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
-                    main.process_once()
+        # We need to make sure main.py uses our test directory
+        with patch('os.path.abspath', return_value=os.path.join(self.test_dir, 'main.py')):
+          with patch('os.path.dirname', return_value=self.test_dir):
+            with patch('os.chdir'): # Prevent chdir from actually running
+              # We'll mock run_batch to fail
+              with patch('main.run_batch', side_effect=PersistenceError("Failed")):
+                  with patch('main.clear_input_file') as mock_clear:
+                      with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
+                          main.process_once()
 
-                mock_clear.assert_not_called()
+                      mock_clear.assert_not_called()
 
         # Verify file still has content
         with open(self.input_file, 'r') as f:
             self.assertEqual(f.read().strip(), "V100")
+
+    def test_intra_batch_deduplication(self):
+        """Verify that duplicate DNA strings in the same batch are processed only once."""
+        with open(self.input_file, 'w') as f:
+            f.write("V100\nV100\nV200\n")
+
+        run_batch()
+
+        json_out = os.path.join(self.output_dir, 'toSequence_parsed.json')
+        with open(json_out, 'r') as f:
+            data = json.load(f)
+            # Should have V100 and V200, but not V100 twice
+            self.assertEqual(len(data), 2)
+            dnas = [entry['dna'] for entry in data]
+            self.assertIn('V100', dnas)
+            self.assertIn('V200', dnas)
+
+        with open(self.ledger_file, 'r') as f:
+            ledger = json.load(f)
+            self.assertEqual(len(ledger), 2)
+
+    def test_ledger_atomicity(self):
+        """Verify that the ledger is NOT updated if the atomic write of other files fails."""
+        # Process one item first
+        run_batch()
+        with open(self.ledger_file, 'r') as f:
+            self.assertEqual(len(json.load(f)), 1)
+
+        # Now try to process another item but fail during rename of the CSV
+        with open(self.input_file, 'w') as f:
+            f.write("V200\n")
+
+        orig_replace = os.replace
+        def mock_replace(src, dst):
+            if 'output.csv' in src:
+                raise OSError("Atomic Swap Failed")
+            return orig_replace(src, dst)
+
+        with patch('os.replace', side_effect=mock_replace):
+            with self.assertRaises(PersistenceError):
+                run_batch()
+
+        # Ledger should still only have 1 item
+        with open(self.ledger_file, 'r') as f:
+            self.assertEqual(len(json.load(f)), 1)
 
 if __name__ == '__main__':
     unittest.main()
