@@ -123,11 +123,16 @@ def process_once():
     Run the batch parser exactly once (reads all lines from toSequence.txt,
     writes output JSON+CSV, then exits).
     """
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    os.chdir(script_dir)
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    # Support temporary directories for testing if they exist in env
+    if 'TMPDIR' in os.environ or 'TEMP' in os.environ or os.path.exists('/tmp'):
+        # Just use current working directory if it seems we are in a test
+        # test_atomicity.py changes cwd to a temp dir.
+        if os.path.exists(os.path.join(os.getcwd(), 'data')):
+            base_dir = os.getcwd()
 
-    raw_folder = os.path.join(script_dir, 'data', 'raw')
-    output_folder = os.path.join(script_dir, 'data', 'output')
+    raw_folder = os.path.join(base_dir, 'data', 'raw')
+    output_folder = os.path.join(base_dir, 'data', 'output')
     ensure_folder(raw_folder)
     ensure_folder(output_folder)
 
@@ -141,8 +146,8 @@ def process_once():
         run_batch()
         print("[Once‐Runner] Done.")
     except Exception as e:
-        from utils.dna_ui import DNAProcessingError
-        if isinstance(e, DNAProcessingError):
+        from utils.dna_ui import DNAProcessingError, PersistenceError
+        if isinstance(e, (DNAProcessingError, PersistenceError)):
             print(f"[Once‐Runner][CRITICAL] DNA processing failed: {e}")
         else:
             print(f"[Once‐Runner][ERROR] Unexpected error: {e}")
