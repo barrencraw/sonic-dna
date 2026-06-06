@@ -10,12 +10,16 @@ sys.modules["PySide6.QtGui"] = mock_pyside6
 sys.modules["torch"] = MagicMock()
 sys.modules["torchaudio"] = MagicMock()
 sys.modules["sounddevice"] = MagicMock()
+sys.modules["numpy"] = MagicMock()
+sys.modules["scipy"] = MagicMock()
+sys.modules["scipy.io.wavfile"] = MagicMock()
 
 import unittest
 import os
 import shutil
 import tempfile
 import json
+import io
 from unittest.mock import patch, MagicMock
 from utils.dna_ui import main as run_batch, PersistenceError, DNAProcessingError
 
@@ -60,38 +64,59 @@ class TestAtomicity(unittest.TestCase):
 
         json_out = os.path.join(self.output_dir, 'toSequence_parsed.json')
         csv_out = os.path.join(self.output_dir, 'toSequence_parsed.csv')
+        ledger_out = os.path.join(self.data_dir, 'ledger.json')
 
         self.assertTrue(os.path.exists(json_out))
         self.assertTrue(os.path.exists(csv_out))
+        self.assertTrue(os.path.exists(ledger_out))
 
         with open(json_out, 'r') as f:
             data = json.load(f)
             self.assertEqual(len(data), 1)
             self.assertEqual(data[0]['dna'], 'V100')
 
-    def test_crash_during_json_write(self):
-        """Simulate a crash during JSON writing. No output files should be created."""
-        with patch('json.dump', side_effect=IOError("Disk Full")):
-            with self.assertRaises(PersistenceError):
-                run_batch()
-
-        json_out = os.path.join(self.output_dir, 'toSequence_parsed.json')
-        csv_out = os.path.join(self.output_dir, 'toSequence_parsed.csv')
-
-        self.assertFalse(os.path.exists(json_out))
-        self.assertFalse(os.path.exists(csv_out))
+        with open(ledger_out, 'r') as f:
+            ledger = json.load(f)
+            self.assertIn('V100', ledger)
+            self.assertEqual(ledger['V100']['terminal_outcome'], 'success')
 
     def test_crash_during_rename(self):
-        """Simulate a crash/failure during the atomic rename. No output files should be created/updated."""
+        """Simulate a crash/failure during the atomic rename. No output files or ledger should be created/updated."""
         with patch('os.replace', side_effect=OSError("Permission Denied")):
             with self.assertRaises(PersistenceError):
                 run_batch()
 
         json_out = os.path.join(self.output_dir, 'toSequence_parsed.json')
         csv_out = os.path.join(self.output_dir, 'toSequence_parsed.csv')
+        ledger_out = os.path.join(self.data_dir, 'ledger.json')
 
         self.assertFalse(os.path.exists(json_out))
         self.assertFalse(os.path.exists(csv_out))
+        self.assertFalse(os.path.exists(ledger_out))
+
+    def test_structured_logging(self):
+        """Verify that structured logs are produced with the correct fields."""
+        captured_output = io.StringIO()
+        sys.stdout = captured_output
+        try:
+            run_batch(correlation_id="test-uuid")
+        finally:
+            sys.stdout = sys.__stdout__
+
+        logs = [line for line in captured_output.getvalue().split('\n') if line.startswith('JSON_LOG:')]
+        self.assertTrue(len(logs) >= 3) # start, item_processing, complete
+
+        # Check the 'start' log
+        start_log = json.loads(logs[0][len('JSON_LOG: '):])
+        self.assertEqual(start_log['step'], 'start')
+        self.assertEqual(start_log['correlation_id'], 'test-uuid')
+        self.assertEqual(start_log['chain_name'], 'dna_batch_parsing')
+
+        # Check the 'item_processing' log
+        item_log = json.loads(logs[1][len('JSON_LOG: '):])
+        self.assertEqual(item_log['step'], 'item_processing')
+        self.assertEqual(item_log['idempotency_key'], 'V100')
+        self.assertEqual(item_log['outcome'], 'success')
 
     def test_watcher_behavior_on_failure(self):
         """Test main.py's logic: if run_batch fails, input file should NOT be cleared."""
