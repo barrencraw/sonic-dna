@@ -13,7 +13,7 @@ class TestIdempotency(unittest.TestCase):
         self.raw_folder = os.path.join(self.data_folder, 'raw')
         self.output_folder = os.path.join(self.data_folder, 'output')
         self.input_file = os.path.join(self.raw_folder, 'toSequence.txt')
-        self.ledger_path = os.path.join(self.data_folder, 'processed_ledger.json')
+        self.ledger_path = os.path.join(self.data_folder, 'ledger.json')
         self.json_output = os.path.join(self.output_folder, 'toSequence_parsed.json')
 
         # Backup existing data if any
