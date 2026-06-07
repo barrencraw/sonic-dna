@@ -3,6 +3,7 @@ import os
 import json
 import csv
 import time
+from enum import Enum
 from utils.dna_calculator import DNACalculator, RuleParseError
 
 def ensure_folder(path):
@@ -50,6 +51,13 @@ class RuleLoadError(DNAProcessingError):
 class PersistenceError(DNAProcessingError):
     """Raised when writing or moving output files fails."""
     pass
+
+class DNAStatus(Enum):
+    SUCCESS = 'success'
+    PARSE_ERROR = 'error'
+    SKIPPED = 'skipped'
+    PROCESSING = 'processing'
+
 def load_ledger(ledger_path):
     if os.path.exists(ledger_path):
         try:
@@ -63,7 +71,26 @@ def save_ledger(ledger_path, ledger):
     with open(ledger_path, 'w', encoding='utf-8') as f:
         json.dump(ledger, f, indent=2)
 
-def main():
+def log_structured(step, outcome, correlation_id=None, idempotency_key=None, latency_ms=None, actor_id='system'):
+    """
+    Standardized JSON logging with JSON_LOG: prefix.
+    """
+    log_entry = {
+        "timestamp": time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
+        "correlation_id": correlation_id,
+        "chain_name": "dna_batch_processing",
+        "step": step,
+        "outcome": outcome,
+        "actor_id": actor_id
+    }
+    if idempotency_key:
+        log_entry["idempotency_key"] = idempotency_key
+    if latency_ms is not None:
+        log_entry["latency_ms"] = latency_ms
+
+    print(f"JSON_LOG: {json.dumps(log_entry)}")
+
+def main(correlation_id=None):
     # Determine file paths
     project_root = os.getcwd()
     raw_folder = os.path.join(project_root, 'data', 'raw')
@@ -123,18 +150,29 @@ def main():
     from utils.dna_calculator import RuleParseError
 
     new_processed_count = 0
-    for dna_str in dna_list:
-        idempotency_key = dna_str
+    for dna_sequence in dna_list:
+        start_time = time.time()
+        idempotency_key = dna_sequence
         if idempotency_key in ledger:
-            print(f"[Idempotency] key={idempotency_key} dedupe_hit=True terminal_outcome={ledger[idempotency_key]['terminal_outcome']}")
+            log_structured(
+                step="dedupe",
+                outcome="skipped",
+                correlation_id=correlation_id,
+                idempotency_key=idempotency_key
+            )
             continue
 
-        print(f"[Idempotency] key={idempotency_key} dedupe_hit=False terminal_outcome=processing")
+        log_structured(
+            step="parse",
+            outcome="processing",
+            correlation_id=correlation_id,
+            idempotency_key=idempotency_key
+        )
 
         try:
-            result = calculator.parse(dna_str)
+            result = calculator.parse(dna_sequence)
             entry = {
-                'dna': dna_str,
+                'dna_sequence': dna_sequence,
                 'rule': result['rule'],
                 'parsed': result['values']
             }
@@ -142,23 +180,37 @@ def main():
 
             # Flatten for CSV
             flat = flatten_parsed(result['rule'], result['values'])
-            flat['dna'] = dna_str
+            flat['dna_sequence'] = dna_sequence
             flat['rule'] = result['rule']
             csv_rows.append(flat)
             all_flattened_keys.update(flat.keys())
-            outcome = "success"
+            outcome = DNAStatus.SUCCESS.value
 
         except RuleParseError as e:
             # On parse error, record as error entry
             parsed_json.append({
-                'dna': dna_str,
+                'dna_sequence': dna_sequence,
                 'error': str(e)
             })
             # Also put a row in CSV listing error
-            flat = {'dna': dna_str, 'error': str(e)}
+            flat = {'dna_sequence': dna_sequence, 'error': str(e)}
             csv_rows.append(flat)
             all_flattened_keys.update(flat.keys())
-            outcome = f"error: {str(e)}"
+            outcome = f"{DNAStatus.PARSE_ERROR.value}: {str(e)}"
+
+        ledger[idempotency_key] = {
+            'terminal_outcome': outcome,
+            'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
+        }
+        latency = int((time.time() - start_time) * 1000)
+        log_structured(
+            step="complete",
+            outcome=outcome,
+            correlation_id=correlation_id,
+            idempotency_key=idempotency_key,
+            latency_ms=latency
+        )
+        new_processed_count += 1
 
     # ATOMIC WRITE PATTERN:
     # 1. Write to a temporary directory in the same filesystem as the output folder
@@ -199,12 +251,6 @@ def main():
             raise PersistenceError("Failed to write output files atomically") from e
 
     print(f"[OK] Parsed {len(dna_list)} DNA strings.")
-        ledger[idempotency_key] = {
-            'terminal_outcome': outcome,
-            'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
-        }
-        print(f"[Idempotency] key={idempotency_key} dedupe_hit=False terminal_outcome={outcome}")
-        new_processed_count += 1
 
     if new_processed_count > 0:
         # Save ledger
