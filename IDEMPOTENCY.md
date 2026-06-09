@@ -16,7 +16,7 @@
 The **DNA Batch Parser** was selected because it is the core data processing path. Without idempotency, duplicated DNA strings (due to retries or at-least-once message delivery) would lead to redundant computation and corrupted/duplicate entries in the cumulative output files (`toSequence_parsed.json`/`.csv`).
 
 ### Implementation Details:
-- **Best Available Primitive:** Processed message ledger (`data/processed_ledger.json`).
+- **Best Available Primitive:** Processed message ledger (`data/ledger.json`).
 - **Idempotency Key:** The DNA string itself (unique representation of the sound property).
 - **Observability:** Logs `idempotency_key`, `dedupe_hit`, and `terminal_outcome`.
 - **Side Effects:** Results are appended to cumulative JSON/CSV stores only if the key is new in the ledger.
