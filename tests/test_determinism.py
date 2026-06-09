@@ -1,3 +1,13 @@
+import sys
+from unittest.mock import MagicMock
+
+# Mock UI dependencies
+mock_pyside6 = MagicMock()
+sys.modules["PySide6"] = mock_pyside6
+sys.modules["PySide6.QtWidgets"] = mock_pyside6
+sys.modules["PySide6.QtCore"] = mock_pyside6
+sys.modules["PySide6.QtGui"] = mock_pyside6
+
 import numpy as np
 import pytest
 from ui.music_panel import gen_wave
