@@ -10,6 +10,10 @@ sys.modules["PySide6.QtGui"] = mock_pyside6
 sys.modules["torch"] = MagicMock()
 sys.modules["torchaudio"] = MagicMock()
 sys.modules["sounddevice"] = MagicMock()
+sys.modules["numpy"] = MagicMock()
+sys.modules["scipy"] = MagicMock()
+sys.modules["scipy.io"] = MagicMock()
+sys.modules["scipy.io.wavfile"] = MagicMock()
 
 import unittest
 import os
@@ -35,6 +39,8 @@ class TestAtomicity(unittest.TestCase):
         self.input_file = os.path.join(self.raw_dir, 'toSequence.txt')
         with open(self.input_file, 'w') as f:
             f.write("V100\n")
+
+        self.ledger_file = os.path.join(self.data_dir, 'ledger.json')
 
         # Mock a rule file
         self.rule_file = os.path.join(self.rules_dir, 'rules_Volume.json')
@@ -63,11 +69,12 @@ class TestAtomicity(unittest.TestCase):
 
         self.assertTrue(os.path.exists(json_out))
         self.assertTrue(os.path.exists(csv_out))
+        self.assertTrue(os.path.exists(self.ledger_file))
 
         with open(json_out, 'r') as f:
             data = json.load(f)
             self.assertEqual(len(data), 1)
-            self.assertEqual(data[0]['dna'], 'V100')
+            self.assertEqual(data[0]['dna_sequence'], 'V100')
 
     def test_crash_during_json_write(self):
         """Simulate a crash during JSON writing. No output files should be created."""
@@ -80,6 +87,7 @@ class TestAtomicity(unittest.TestCase):
 
         self.assertFalse(os.path.exists(json_out))
         self.assertFalse(os.path.exists(csv_out))
+        self.assertFalse(os.path.exists(self.ledger_file))
 
     def test_crash_during_rename(self):
         """Simulate a crash/failure during the atomic rename. No output files should be created/updated."""
@@ -92,6 +100,7 @@ class TestAtomicity(unittest.TestCase):
 
         self.assertFalse(os.path.exists(json_out))
         self.assertFalse(os.path.exists(csv_out))
+        self.assertFalse(os.path.exists(self.ledger_file))
 
     def test_watcher_behavior_on_failure(self):
         """Test main.py's logic: if run_batch fails, input file should NOT be cleared."""
@@ -100,11 +109,19 @@ class TestAtomicity(unittest.TestCase):
             del sys.modules['main']
         import main
 
+        # Fix input_file for main.py (it uses script_dir/data/raw/toSequence.txt)
+        script_dir = os.path.dirname(os.path.abspath(main.__file__))
+        main_input_file = os.path.join(script_dir, 'data', 'raw', 'toSequence.txt')
+        os.makedirs(os.path.dirname(main_input_file), exist_ok=True)
+        with open(main_input_file, 'w') as f:
+            f.write("V100\n")
+
         # We'll mock run_batch to fail
         with patch('main.run_batch', side_effect=PersistenceError("Failed")):
             with patch('main.clear_input_file') as mock_clear:
-                with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
+                with patch('sys.exit') as mock_exit:
                     main.process_once()
+                    mock_exit.assert_called_once_with(1)
 
                 mock_clear.assert_not_called()
 
