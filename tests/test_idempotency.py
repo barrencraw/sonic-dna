@@ -53,7 +53,7 @@ class TestIdempotency(unittest.TestCase):
         with open(self.json_output, 'r') as f:
             data = json.load(f)
         self.assertEqual(len(data), 1)
-        self.assertEqual(data[0]['dna'], dna)
+        self.assertEqual(data[0]['dna_sequence'], dna)
 
         with open(self.ledger_path, 'r') as f:
             ledger = json.load(f)
@@ -83,8 +83,9 @@ class TestIdempotency(unittest.TestCase):
         with open(self.json_output, 'r') as f:
             data = json.load(f)
         # It should process dna1 (once) and dna2 (once)
+        # NOTE: If intra-batch deduplication is NOT implemented, it might process dna1 twice if ledger isn't updated mid-batch.
         self.assertEqual(len(data), 2, "Should have exactly 2 entries")
-        dnas = [entry['dna'] for entry in data]
+        dnas = [entry['dna_sequence'] for entry in data]
         self.assertIn(dna1, dnas)
         self.assertIn(dna2, dnas)
 
@@ -124,7 +125,7 @@ class TestIdempotency(unittest.TestCase):
         # Since VOL08900750712 was in the ledger, it was NOT re-processed.
         # Only VOL00000000000 is in the new output.
         self.assertEqual(len(data), 1)
-        self.assertEqual(data[0]['dna'], new_dna)
+        self.assertEqual(data[0]['dna_sequence'], new_dna)
 
 if __name__ == '__main__':
     unittest.main()
