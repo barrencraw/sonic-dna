@@ -5,7 +5,7 @@
 | Trigger | “Same request” equivalence definition (candidate idempotency key) | Current dedupe (before hardening) | Duplication blast radius (double spend, duplicate event, torn state) |
 | :--- | :--- | :--- | :--- |
 | **Watcher (`main.py`)** | Full content of `toSequence.txt` | In-memory `last_content` check | Redundant parsing/overwriting of `toSequence_parsed.json` if file isn't cleared fast enough. |
-| **Batch Parser (`utils/dna_ui.py`)** | DNA string (e.g., `VOL08900750712`) | None (overwrote output every time) | Duplicate entries in cumulative datasets; wasted CPU/IO on already-calculated DNA. |
+| **Batch Parser (`utils/dna_ui.py`)** | DNA sequence (e.g., `VOL08900750712`) | None (overwrote output every time) | Duplicate entries in cumulative datasets; wasted CPU/IO on already-calculated DNA. |
 | **UI "Download" Button** | Selected wave + timestamp | None (OS handles overwrite) | Redundant file writes to disk. |
 | **UI "Play" Button** | Selected wave | `is_playing` flag | Minimal; `sd.stop()` handles overlaps. |
 
