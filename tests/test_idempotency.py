@@ -13,7 +13,7 @@ class TestIdempotency(unittest.TestCase):
         self.raw_folder = os.path.join(self.data_folder, 'raw')
         self.output_folder = os.path.join(self.data_folder, 'output')
         self.input_file = os.path.join(self.raw_folder, 'toSequence.txt')
-        self.ledger_path = os.path.join(self.data_folder, 'processed_ledger.json')
+        self.ledger_path = os.path.join(self.data_folder, 'ledger.json')
         self.json_output = os.path.join(self.output_folder, 'toSequence_parsed.json')
 
         # Backup existing data if any
@@ -56,7 +56,8 @@ class TestIdempotency(unittest.TestCase):
         self.assertEqual(data[0]['dna'], dna)
 
         with open(self.ledger_path, 'r') as f:
-            ledger = json.load(f)
+            state = json.load(f)
+        ledger = state.get('ledger', state)
         self.assertIn(dna, ledger)
         self.assertEqual(ledger[dna]['terminal_outcome'], 'success')
 
@@ -99,14 +100,9 @@ class TestIdempotency(unittest.TestCase):
         run_batch() # Success
 
         with open(self.ledger_path, 'r') as f:
-            ledger = json.load(f)
+            state = json.load(f)
+        ledger = state.get('ledger', state)
         self.assertIn(dna, ledger)
-
-        # Simulate a crash where the output file was lost but ledger remained (or vice-versa)
-        # If output file is lost, next run should NOT re-process if it's in the ledger.
-        # WAIT: The requirement is "retry after transient failure → eventual consistency without corruption".
-        # If the output file is cumulative and we lose it, but keep the ledger, we might miss the data.
-        # But idempotency usually means "don't do it again if you already did it".
 
         # Let's test if it handles corrupted output file gracefully.
         with open(self.json_output, 'w') as f:
