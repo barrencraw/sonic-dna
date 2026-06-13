@@ -11,20 +11,6 @@ main.py
 – If you want to run only a one‐time batch parse (no GUI), you can launch with
     python main.py --once
   and it will parse everything in toSequence.txt exactly once, write outputs, then exit.
-
-Directory layout (relative to where this main.py lives):
-
-  /your_project_root/
-  ├─ main.py
-  ├─ dna_calculator.py
-  ├─ dna_ui.py
-  ├─ ui/
-  │   └─ main_window.py     ← your existing PySide6 window code
-  ├─ rules/                 ← all your rule_*.json files
-  └─ data/
-      ├─ raw/
-      │   └─ toSequence.txt ← add one DNA string per line here
-      └─ output/            ← results (toSequence_parsed.json + .csv) get written here
 """
 
 import os
@@ -32,6 +18,7 @@ import sys
 import time
 import threading
 import argparse
+import uuid
 
 # ─── Import the batch parser and the GUI window ───────────────────────────────
 from utils.dna_ui import main as run_batch
@@ -69,7 +56,6 @@ def watch_loop():
     run the batch parser and then clear toSequence.txt. Sleeps 1 second between checks.
     """
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    os.chdir(script_dir)
 
     raw_folder = os.path.join(script_dir, 'data', 'raw')
     output_folder = os.path.join(script_dir, 'data', 'output')
@@ -86,11 +72,12 @@ def watch_loop():
 
             # If there’s new non‐empty content that differs from last run, process it:
             if current_content.strip() and current_content != last_content:
+                correlation_id = str(uuid.uuid4())
                 timestamp = time.strftime('%Y-%m-%d %H:%M:%S')
-                print(f"[{timestamp}] New DNA detected → running parser…")
+                print(f"[{timestamp}] New DNA detected [CID:{correlation_id}] → running parser…")
 
                 try:
-                    run_batch()
+                    run_batch(correlation_id=correlation_id, base_dir=script_dir)
                     # Only clear the input file if run_batch() succeeds
                     clear_input_file(input_file)
                     print(f"[{timestamp}] Parsing complete. Cleared toSequence.txt.\n")
@@ -124,7 +111,6 @@ def process_once():
     writes output JSON+CSV, then exits).
     """
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    os.chdir(script_dir)
 
     raw_folder = os.path.join(script_dir, 'data', 'raw')
     output_folder = os.path.join(script_dir, 'data', 'output')
@@ -136,9 +122,10 @@ def process_once():
         print(f"[ERROR] Input file not found: {input_file}")
         return
 
-    print("[Once‐Runner] Processing all DNA strings once…")
+    correlation_id = str(uuid.uuid4())
+    print(f"[Once‐Runner] Processing all DNA strings once [CID:{correlation_id}]…")
     try:
-        run_batch()
+        run_batch(correlation_id=correlation_id, base_dir=script_dir)
         print("[Once‐Runner] Done.")
     except Exception as e:
         from utils.dna_ui import DNAProcessingError
