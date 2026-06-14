@@ -20,9 +20,7 @@ setup(
             "toongloom = main:main"
         ]
     },
-    author="Your Name",
+    author="James",
     description="SonicDNA and generative music app.",
     python_requires=">=3.10",
-)
-
 )
