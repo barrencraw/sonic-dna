@@ -13,7 +13,7 @@ class TestIdempotency(unittest.TestCase):
         self.raw_folder = os.path.join(self.data_folder, 'raw')
         self.output_folder = os.path.join(self.data_folder, 'output')
         self.input_file = os.path.join(self.raw_folder, 'toSequence.txt')
-        self.ledger_path = os.path.join(self.data_folder, 'processed_ledger.json')
+        self.ledger_path = os.path.join(self.data_folder, 'ledger.json')
         self.json_output = os.path.join(self.output_folder, 'toSequence_parsed.json')
 
         # Backup existing data if any
@@ -53,10 +53,11 @@ class TestIdempotency(unittest.TestCase):
         with open(self.json_output, 'r') as f:
             data = json.load(f)
         self.assertEqual(len(data), 1)
-        self.assertEqual(data[0]['dna'], dna)
+        self.assertEqual(data[0]['dna_sequence'], dna)
 
         with open(self.ledger_path, 'r') as f:
-            ledger = json.load(f)
+            state = json.load(f)
+            ledger = state.get('ledger', state)
         self.assertIn(dna, ledger)
         self.assertEqual(ledger[dna]['terminal_outcome'], 'success')
 
@@ -84,7 +85,7 @@ class TestIdempotency(unittest.TestCase):
             data = json.load(f)
         # It should process dna1 (once) and dna2 (once)
         self.assertEqual(len(data), 2, "Should have exactly 2 entries")
-        dnas = [entry['dna'] for entry in data]
+        dnas = [entry['dna_sequence'] for entry in data]
         self.assertIn(dna1, dnas)
         self.assertIn(dna2, dnas)
 
@@ -99,7 +100,8 @@ class TestIdempotency(unittest.TestCase):
         run_batch() # Success
 
         with open(self.ledger_path, 'r') as f:
-            ledger = json.load(f)
+            state = json.load(f)
+            ledger = state.get('ledger', state)
         self.assertIn(dna, ledger)
 
         # Simulate a crash where the output file was lost but ledger remained (or vice-versa)
@@ -124,7 +126,7 @@ class TestIdempotency(unittest.TestCase):
         # Since VOL08900750712 was in the ledger, it was NOT re-processed.
         # Only VOL00000000000 is in the new output.
         self.assertEqual(len(data), 1)
-        self.assertEqual(data[0]['dna'], new_dna)
+        self.assertEqual(data[0]['dna_sequence'], new_dna)
 
 if __name__ == '__main__':
     unittest.main()
