@@ -36,6 +36,9 @@ class TestAtomicity(unittest.TestCase):
         with open(self.input_file, 'w') as f:
             f.write("V100\n")
 
+        # Ensure data/raw directory exists relative to CWD too for main.py imports
+        os.makedirs(os.path.join(self.test_dir, 'data', 'raw'), exist_ok=True)
+
         # Mock a rule file
         self.rule_file = os.path.join(self.rules_dir, 'rules_Volume.json')
         with open(self.rule_file, 'w') as f:
@@ -67,7 +70,7 @@ class TestAtomicity(unittest.TestCase):
         with open(json_out, 'r') as f:
             data = json.load(f)
             self.assertEqual(len(data), 1)
-            self.assertEqual(data[0]['dna'], 'V100')
+            self.assertEqual(data[0]['dna_sequence'], 'V100')
 
     def test_crash_during_json_write(self):
         """Simulate a crash during JSON writing. No output files should be created."""
@@ -98,18 +101,30 @@ class TestAtomicity(unittest.TestCase):
         # Force import after mocks
         if 'main' in sys.modules:
             del sys.modules['main']
+
+        # main.py uses os.path.dirname(os.path.abspath(__file__)) which will point to /app/main.py
+        # but we want it to work in our test_dir.
+
         import main
 
-        # We'll mock run_batch to fail
-        with patch('main.run_batch', side_effect=PersistenceError("Failed")):
-            with patch('main.clear_input_file') as mock_clear:
-                with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
-                    main.process_once()
+        # Use our test_dir paths for the internal logic of main.py
+        mock_raw_folder = os.path.join(self.test_dir, 'data', 'raw')
+        os.makedirs(mock_raw_folder, exist_ok=True)
+        mock_input_file = os.path.join(mock_raw_folder, 'toSequence.txt')
+        with open(mock_input_file, 'w') as f:
+            f.write("V100\n")
 
-                mock_clear.assert_not_called()
+        with patch('main.os.path.dirname', return_value=self.test_dir):
+            with patch('main.os.path.abspath', return_value=os.path.join(self.test_dir, 'main.py')):
+                with patch('main.run_batch', side_effect=PersistenceError("Failed")):
+                    with patch('main.clear_input_file') as mock_clear:
+                        with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
+                            main.process_once()
+
+                        mock_clear.assert_not_called()
 
         # Verify file still has content
-        with open(self.input_file, 'r') as f:
+        with open(mock_input_file, 'r') as f:
             self.assertEqual(f.read().strip(), "V100")
 
 if __name__ == '__main__':
