@@ -56,6 +56,10 @@ class TestAtomicity(unittest.TestCase):
 
     def test_successful_parsing(self):
         """Verify that parsing works correctly under normal conditions."""
+        # DNA for Volume (prefix 'VOL')
+        dna = "VOL08900750712"
+        with open(self.input_file, 'w') as f:
+            f.write(dna + "\n")
         run_batch()
 
         json_out = os.path.join(self.output_dir, 'toSequence_parsed.json')
@@ -67,7 +71,7 @@ class TestAtomicity(unittest.TestCase):
         with open(json_out, 'r') as f:
             data = json.load(f)
             self.assertEqual(len(data), 1)
-            self.assertEqual(data[0]['dna'], 'V100')
+            self.assertEqual(data[0]['dna'], dna)
 
     def test_crash_during_json_write(self):
         """Simulate a crash during JSON writing. No output files should be created."""
@@ -95,13 +99,21 @@ class TestAtomicity(unittest.TestCase):
 
     def test_watcher_behavior_on_failure(self):
         """Test main.py's logic: if run_batch fails, input file should NOT be cleared."""
+        # DNA for Volume (prefix 'VOL')
+        dna = "VOL08900750712"
+        with open(self.input_file, 'w') as f:
+            f.write(dna + "\n")
+
         # Force import after mocks
         if 'main' in sys.modules:
             del sys.modules['main']
         import main
 
         # We'll mock run_batch to fail
-        with patch('main.run_batch', side_effect=PersistenceError("Failed")):
+        # Patch os.chdir and os.path.dirname to stay in our test dir
+        with patch('main.run_batch', side_effect=PersistenceError("Failed")), \
+             patch('main.os.chdir'), \
+             patch('main.os.path.dirname', return_value=self.test_dir):
             with patch('main.clear_input_file') as mock_clear:
                 with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
                     main.process_once()
@@ -110,7 +122,7 @@ class TestAtomicity(unittest.TestCase):
 
         # Verify file still has content
         with open(self.input_file, 'r') as f:
-            self.assertEqual(f.read().strip(), "V100")
+            self.assertEqual(f.read().strip(), dna)
 
 if __name__ == '__main__':
     unittest.main()
