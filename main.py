@@ -30,11 +30,12 @@ Directory layout (relative to where this main.py lives):
 import os
 import sys
 import time
+import uuid
 import threading
 import argparse
 
 # ─── Import the batch parser and the GUI window ───────────────────────────────
-from utils.dna_ui import main as run_batch
+from utils.dna_ui import main as run_batch, log_structured
 from utils.providers import RngProvider
 from PySide6.QtWidgets import QApplication
 from ui.main_window import MainWindow
@@ -89,18 +90,20 @@ def watch_loop():
                 timestamp = time.strftime('%Y-%m-%d %H:%M:%S')
                 print(f"[{timestamp}] New DNA detected → running parser…")
 
+                correlation_id = str(uuid.uuid4())
+                log_structured(correlation_id, "dna_watcher", "new_content_detected", "success", msg="New DNA detected")
                 try:
-                    run_batch()
+                    run_batch(correlation_id=correlation_id)
                     # Only clear the input file if run_batch() succeeds
                     clear_input_file(input_file)
-                    print(f"[{timestamp}] Parsing complete. Cleared toSequence.txt.\n")
+                    log_structured(correlation_id, "dna_watcher", "batch_complete", "success", msg="Parsing complete. Cleared toSequence.txt.")
                 except Exception as e:
                     # Classify errors
                     from utils.dna_ui import DNAProcessingError
                     if isinstance(e, DNAProcessingError):
-                        print(f"[{timestamp}][Watcher][CRITICAL] DNA processing failed: {e}")
+                        log_structured(correlation_id, "dna_watcher", "batch_error", "critical", msg=f"DNA processing failed: {e}")
                     else:
-                        print(f"[{timestamp}][Watcher][ERROR] Unexpected error: {e}")
+                        log_structured(correlation_id, "dna_watcher", "batch_error", "error", msg=f"Unexpected error: {e}")
                     # In case of error, we DO NOT clear the input file so we can retry or investigate
 
                 # Reset last_content so we’ll catch the next chunk of DNA
@@ -136,16 +139,17 @@ def process_once():
         print(f"[ERROR] Input file not found: {input_file}")
         return
 
-    print("[Once‐Runner] Processing all DNA strings once…")
+    correlation_id = str(uuid.uuid4())
+    log_structured(correlation_id, "once_runner", "start", "success", msg="Processing all DNA strings once")
     try:
-        run_batch()
-        print("[Once‐Runner] Done.")
+        run_batch(correlation_id=correlation_id)
+        log_structured(correlation_id, "once_runner", "complete", "success")
     except Exception as e:
         from utils.dna_ui import DNAProcessingError
         if isinstance(e, DNAProcessingError):
-            print(f"[Once‐Runner][CRITICAL] DNA processing failed: {e}")
+            log_structured(correlation_id, "once_runner", "error", "critical", msg=f"DNA processing failed: {e}")
         else:
-            print(f"[Once‐Runner][ERROR] Unexpected error: {e}")
+            log_structured(correlation_id, "once_runner", "error", "error", msg=f"Unexpected error: {e}")
         sys.exit(1)
 
 # ─── MAIN ENTRYPOINT ───────────────────────────────────────────────────────────
