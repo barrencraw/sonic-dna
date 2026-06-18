@@ -19,7 +19,9 @@ class TestIdempotency(unittest.TestCase):
         # Backup existing data if any
         self.backup_folder = os.path.join(self.project_root, 'data_backup')
         if os.path.exists(self.data_folder):
-            shutil.copytree(self.data_folder, self.backup_folder, dirs_exist_ok=True)
+            if os.path.exists(self.backup_folder):
+                shutil.rmtree(self.backup_folder)
+            shutil.copytree(self.data_folder, self.backup_folder)
 
         # Ensure clean state for test
         if os.path.exists(self.data_folder):
@@ -36,9 +38,7 @@ class TestIdempotency(unittest.TestCase):
         if os.path.exists(self.data_folder):
             shutil.rmtree(self.data_folder)
         if os.path.exists(self.backup_folder):
-            # Check if backup exists before moving
-            if os.path.exists(self.backup_folder):
-                shutil.move(self.backup_folder, self.data_folder)
+            shutil.move(self.backup_folder, self.data_folder)
 
     def test_double_invocation_same_key(self):
         # DNA for Volume (prefix 'VOL')
@@ -53,7 +53,7 @@ class TestIdempotency(unittest.TestCase):
         with open(self.json_output, 'r') as f:
             data = json.load(f)
         self.assertEqual(len(data), 1)
-        self.assertEqual(data[0]['dna'], dna)
+        self.assertEqual(data[0]['dna_sequence'], dna)
 
         with open(self.ledger_path, 'r') as f:
             ledger = json.load(f)
@@ -84,7 +84,7 @@ class TestIdempotency(unittest.TestCase):
             data = json.load(f)
         # It should process dna1 (once) and dna2 (once)
         self.assertEqual(len(data), 2, "Should have exactly 2 entries")
-        dnas = [entry['dna'] for entry in data]
+        dnas = [entry['dna_sequence'] for entry in data]
         self.assertIn(dna1, dnas)
         self.assertIn(dna2, dnas)
 
@@ -102,12 +102,6 @@ class TestIdempotency(unittest.TestCase):
             ledger = json.load(f)
         self.assertIn(dna, ledger)
 
-        # Simulate a crash where the output file was lost but ledger remained (or vice-versa)
-        # If output file is lost, next run should NOT re-process if it's in the ledger.
-        # WAIT: The requirement is "retry after transient failure → eventual consistency without corruption".
-        # If the output file is cumulative and we lose it, but keep the ledger, we might miss the data.
-        # But idempotency usually means "don't do it again if you already did it".
-
         # Let's test if it handles corrupted output file gracefully.
         with open(self.json_output, 'w') as f:
             f.write("CORRUPTED")
@@ -124,7 +118,7 @@ class TestIdempotency(unittest.TestCase):
         # Since VOL08900750712 was in the ledger, it was NOT re-processed.
         # Only VOL00000000000 is in the new output.
         self.assertEqual(len(data), 1)
-        self.assertEqual(data[0]['dna'], new_dna)
+        self.assertEqual(data[0]['dna_sequence'], new_dna)
 
 if __name__ == '__main__':
     unittest.main()
