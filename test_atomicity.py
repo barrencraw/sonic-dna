@@ -10,6 +10,10 @@ sys.modules["PySide6.QtGui"] = mock_pyside6
 sys.modules["torch"] = MagicMock()
 sys.modules["torchaudio"] = MagicMock()
 sys.modules["sounddevice"] = MagicMock()
+sys.modules["numpy"] = MagicMock()
+sys.modules["scipy"] = MagicMock()
+sys.modules["scipy.io"] = MagicMock()
+sys.modules["scipy.io.wavfile"] = MagicMock()
 
 import unittest
 import os
@@ -101,7 +105,10 @@ class TestAtomicity(unittest.TestCase):
         import main
 
         # We'll mock run_batch to fail
-        with patch('main.run_batch', side_effect=PersistenceError("Failed")):
+        # We also need to patch os.path.dirname and os.path.abspath to point to our test_dir
+        with patch('main.os.path.dirname', return_value=self.test_dir), \
+             patch('main.os.path.abspath', return_value=self.test_dir), \
+             patch('main.run_batch', side_effect=PersistenceError("Failed")):
             with patch('main.clear_input_file') as mock_clear:
                 with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
                     main.process_once()
