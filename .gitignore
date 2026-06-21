@@ -16,6 +16,9 @@ Thumbs.db
 
 toongloom-venv/
 data/
+build/
+*.egg-info/
+.pytest_cache/
 
 # Empty __init__.py files
 ui/__init__.py
