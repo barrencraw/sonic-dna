@@ -36,9 +36,16 @@ class TestIdempotency(unittest.TestCase):
         if os.path.exists(self.data_folder):
             shutil.rmtree(self.data_folder)
         if os.path.exists(self.backup_folder):
-            # Check if backup exists before moving
-            if os.path.exists(self.backup_folder):
-                shutil.move(self.backup_folder, self.data_folder)
+            shutil.move(self.backup_folder, self.data_folder)
+
+    def get_ledger(self):
+        if os.path.exists(self.ledger_path):
+            with open(self.ledger_path, 'r') as f:
+                data = json.load(f)
+                if 'ledger' in data:
+                    return data['ledger']
+                return data
+        return {}
 
     def test_double_invocation_same_key(self):
         # DNA for Volume (prefix 'VOL')
@@ -55,8 +62,7 @@ class TestIdempotency(unittest.TestCase):
         self.assertEqual(len(data), 1)
         self.assertEqual(data[0]['dna'], dna)
 
-        with open(self.ledger_path, 'r') as f:
-            ledger = json.load(f)
+        ledger = self.get_ledger()
         self.assertIn(dna, ledger)
         self.assertEqual(ledger[dna]['terminal_outcome'], 'success')
 
@@ -98,15 +104,8 @@ class TestIdempotency(unittest.TestCase):
 
         run_batch() # Success
 
-        with open(self.ledger_path, 'r') as f:
-            ledger = json.load(f)
+        ledger = self.get_ledger()
         self.assertIn(dna, ledger)
-
-        # Simulate a crash where the output file was lost but ledger remained (or vice-versa)
-        # If output file is lost, next run should NOT re-process if it's in the ledger.
-        # WAIT: The requirement is "retry after transient failure → eventual consistency without corruption".
-        # If the output file is cumulative and we lose it, but keep the ledger, we might miss the data.
-        # But idempotency usually means "don't do it again if you already did it".
 
         # Let's test if it handles corrupted output file gracefully.
         with open(self.json_output, 'w') as f:
