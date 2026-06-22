@@ -1,0 +1,13 @@
+JSON_LOG: {"timestamp": "2026-06-22 13:24:12", "correlation_id": "test-corr-id", "chain_name": "dna_batch", "step": "batch_started", "outcome": "processing", "actor_id": "manual-test", "idempotency_key": null}
+[Idempotency] key=V123 dedupe_hit=False terminal_outcome=processing
+[Idempotency] key=V123 dedupe_hit=False terminal_outcome=error: No matching rule for DNA 'V123'
+JSON_LOG: {"timestamp": "2026-06-22 13:24:12", "correlation_id": "test-corr-id", "chain_name": "dna_batch", "step": "item_processed", "outcome": "error: No matching rule for DNA 'V123'", "actor_id": "manual-test", "idempotency_key": "V123"}
+[OK] Parsed 1 DNA strings.
+[OK] Processed 1 new DNA strings. Total in ledger: 1
+JSON_LOG: {"timestamp": "2026-06-22 13:24:12", "correlation_id": "test-corr-id", "chain_name": "dna_batch", "step": "batch_completed", "outcome": "success", "actor_id": "manual-test", "idempotency_key": null}
+JSON_LOG: {"timestamp": "2026-06-22 13:24:35", "correlation_id": "test-corr-id-2", "chain_name": "dna_batch", "step": "batch_started", "outcome": "processing", "actor_id": "manual-test", "idempotency_key": null}
+[Idempotency] key=V123 dedupe_hit=True terminal_outcome=error: No matching rule for DNA 'V123'
+JSON_LOG: {"timestamp": "2026-06-22 13:24:35", "correlation_id": "test-corr-id-2", "chain_name": "dna_batch", "step": "item_processed", "outcome": "skipped", "actor_id": "manual-test", "idempotency_key": "V123"}
+[OK] Parsed 1 DNA strings.
+[OK] Processed 0 new DNA strings. Total in ledger: 1
+JSON_LOG: {"timestamp": "2026-06-22 13:24:35", "correlation_id": "test-corr-id-2", "chain_name": "dna_batch", "step": "batch_completed", "outcome": "success", "actor_id": "manual-test", "idempotency_key": null}
