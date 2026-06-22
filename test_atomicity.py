@@ -10,6 +10,10 @@ sys.modules["PySide6.QtGui"] = mock_pyside6
 sys.modules["torch"] = MagicMock()
 sys.modules["torchaudio"] = MagicMock()
 sys.modules["sounddevice"] = MagicMock()
+sys.modules["numpy"] = MagicMock()
+sys.modules["scipy"] = MagicMock()
+sys.modules["scipy.io"] = MagicMock()
+sys.modules["scipy.io.wavfile"] = MagicMock()
 
 import unittest
 import os
@@ -100,13 +104,16 @@ class TestAtomicity(unittest.TestCase):
             del sys.modules['main']
         import main
 
-        # We'll mock run_batch to fail
-        with patch('main.run_batch', side_effect=PersistenceError("Failed")):
-            with patch('main.clear_input_file') as mock_clear:
-                with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
-                    main.process_once()
+        # We need to mock os.path.dirname and os.path.abspath because main.py uses them to find data/
+        with patch('main.os.path.dirname', return_value=self.test_dir):
+            with patch('main.os.path.abspath', return_value=self.test_dir):
+                # We'll mock run_batch to fail
+                with patch('main.run_batch', side_effect=PersistenceError("Failed")):
+                    with patch('main.clear_input_file') as mock_clear:
+                        with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
+                            main.process_once()
 
-                mock_clear.assert_not_called()
+                        mock_clear.assert_not_called()
 
         # Verify file still has content
         with open(self.input_file, 'r') as f:
