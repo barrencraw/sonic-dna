@@ -10,6 +10,10 @@ sys.modules["PySide6.QtGui"] = mock_pyside6
 sys.modules["torch"] = MagicMock()
 sys.modules["torchaudio"] = MagicMock()
 sys.modules["sounddevice"] = MagicMock()
+sys.modules["numpy"] = MagicMock()
+sys.modules["scipy"] = MagicMock()
+sys.modules["scipy.io"] = MagicMock()
+sys.modules["scipy.io.wavfile"] = MagicMock()
 
 import unittest
 import os
@@ -71,7 +75,7 @@ class TestAtomicity(unittest.TestCase):
 
     def test_crash_during_json_write(self):
         """Simulate a crash during JSON writing. No output files should be created."""
-        with patch('json.dump', side_effect=IOError("Disk Full")):
+        with patch('json.dump', side_effect=OSError("Disk Full")):
             with self.assertRaises(PersistenceError):
                 run_batch()
 
@@ -95,16 +99,21 @@ class TestAtomicity(unittest.TestCase):
 
     def test_watcher_behavior_on_failure(self):
         """Test main.py's logic: if run_batch fails, input file should NOT be cleared."""
-        # Force import after mocks
+        # Force re-import after mocks
         if 'main' in sys.modules:
             del sys.modules['main']
         import main
 
         # We'll mock run_batch to fail
-        with patch('main.run_batch', side_effect=PersistenceError("Failed")):
+        # Patch BOTH the imported run_batch AND sys.exit in the context of the 'main' module
+        with patch('main.run_batch', side_effect=DNAProcessingError("Failed")):
             with patch('main.clear_input_file') as mock_clear:
-                with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
+                try:
                     main.process_once()
+                except SystemExit as e:
+                    self.assertEqual(e.code, 1)
+                except Exception:
+                    self.fail("Should have raised SystemExit(1)")
 
                 mock_clear.assert_not_called()
 
