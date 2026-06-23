@@ -10,12 +10,17 @@ sys.modules["PySide6.QtGui"] = mock_pyside6
 sys.modules["torch"] = MagicMock()
 sys.modules["torchaudio"] = MagicMock()
 sys.modules["sounddevice"] = MagicMock()
+sys.modules["numpy"] = MagicMock()
+sys.modules["scipy"] = MagicMock()
+sys.modules["scipy.io"] = MagicMock()
+sys.modules["scipy.io.wavfile"] = MagicMock()
 
 import unittest
 import os
 import shutil
 import tempfile
 import json
+import time
 from unittest.mock import patch, MagicMock
 from utils.dna_ui import main as run_batch, PersistenceError, DNAProcessingError
 
@@ -100,17 +105,35 @@ class TestAtomicity(unittest.TestCase):
             del sys.modules['main']
         import main
 
-        # We'll mock run_batch to fail
-        with patch('main.run_batch', side_effect=PersistenceError("Failed")):
-            with patch('main.clear_input_file') as mock_clear:
-                with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
-                    main.process_once()
+        # Patch os.path.dirname and os.path.abspath to point to our test directory
+        with patch('main.os.path.dirname', return_value=self.test_dir), \
+             patch('main.os.path.abspath', side_effect=lambda x: os.path.join(self.test_dir, x) if x == "main.py" else x):
+            # We'll mock run_batch to fail
+            with patch('main.run_batch', side_effect=PersistenceError("Failed")):
+                with patch('main.clear_input_file') as mock_clear:
+                    with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
+                        main.process_once()
 
-                mock_clear.assert_not_called()
+                    mock_clear.assert_not_called()
 
         # Verify file still has content
         with open(self.input_file, 'r') as f:
             self.assertEqual(f.read().strip(), "V100")
+
+    def test_no_overwrite_if_no_new_items(self):
+        """Verify that output files are not touched if no new DNA strings are processed."""
+        # First run to create files
+        run_batch()
+
+        json_out = os.path.join(self.output_dir, 'toSequence_parsed.json')
+        mtime_before = os.path.getmtime(json_out)
+
+        # Second run with same content
+        time.sleep(0.1) # Ensure timestamp would be different
+        run_batch()
+
+        mtime_after = os.path.getmtime(json_out)
+        self.assertEqual(mtime_before, mtime_after, "File should not have been overwritten")
 
 if __name__ == '__main__':
     unittest.main()
