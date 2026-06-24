@@ -3,6 +3,10 @@ from unittest.mock import MagicMock
 
 # Mock dependencies before any imports
 mock_pyside6 = MagicMock()
+sys.modules["numpy"] = MagicMock()
+sys.modules["scipy"] = MagicMock()
+sys.modules["scipy.io"] = MagicMock()
+sys.modules["scipy.io.wavfile"] = MagicMock()
 sys.modules["PySide6"] = mock_pyside6
 sys.modules["PySide6.QtWidgets"] = mock_pyside6
 sys.modules["PySide6.QtCore"] = mock_pyside6
@@ -67,7 +71,7 @@ class TestAtomicity(unittest.TestCase):
         with open(json_out, 'r') as f:
             data = json.load(f)
             self.assertEqual(len(data), 1)
-            self.assertEqual(data[0]['dna'], 'V100')
+            self.assertEqual(data[0]['dna_sequence'], 'V100')
 
     def test_crash_during_json_write(self):
         """Simulate a crash during JSON writing. No output files should be created."""
@@ -103,8 +107,12 @@ class TestAtomicity(unittest.TestCase):
         # We'll mock run_batch to fail
         with patch('main.run_batch', side_effect=PersistenceError("Failed")):
             with patch('main.clear_input_file') as mock_clear:
-                with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
-                    main.process_once()
+                # Patch paths so main.py looks into our temp test_dir
+                with patch('main.os.path.abspath', return_value=os.path.join(self.test_dir, 'main.py')):
+                    with patch('main.os.path.dirname', return_value=self.test_dir):
+                        with patch('main.os.chdir'):
+                            with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
+                                main.process_once()
 
                 mock_clear.assert_not_called()
 
