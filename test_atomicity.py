@@ -10,6 +10,10 @@ sys.modules["PySide6.QtGui"] = mock_pyside6
 sys.modules["torch"] = MagicMock()
 sys.modules["torchaudio"] = MagicMock()
 sys.modules["sounddevice"] = MagicMock()
+sys.modules["numpy"] = MagicMock()
+sys.modules["scipy"] = MagicMock()
+sys.modules["scipy.io"] = MagicMock()
+sys.modules["scipy.io.wavfile"] = MagicMock()
 
 import unittest
 import os
@@ -49,6 +53,12 @@ class TestAtomicity(unittest.TestCase):
 
         self.old_cwd = os.getcwd()
         os.chdir(self.test_dir)
+
+        # Ensure data/raw exists in the current CWD too,
+        # in case main.py doesn't respect CWD for some reason or we mock it.
+        os.makedirs(os.path.join(os.getcwd(), 'data', 'raw'), exist_ok=True)
+        with open(os.path.join(os.getcwd(), 'data', 'raw', 'toSequence.txt'), 'w') as f:
+            f.write("V100\n")
 
     def tearDown(self):
         os.chdir(self.old_cwd)
@@ -100,13 +110,15 @@ class TestAtomicity(unittest.TestCase):
             del sys.modules['main']
         import main
 
-        # We'll mock run_batch to fail
-        with patch('main.run_batch', side_effect=PersistenceError("Failed")):
-            with patch('main.clear_input_file') as mock_clear:
-                with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
-                    main.process_once()
+        # Mock os.path.isfile to always return True for the input file in this test
+        with patch('os.path.isfile', return_value=True):
+            # We'll mock run_batch to fail
+            with patch('main.run_batch', side_effect=PersistenceError("Failed")):
+                with patch('main.clear_input_file') as mock_clear:
+                    with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
+                        main.process_once()
 
-                mock_clear.assert_not_called()
+                    mock_clear.assert_not_called()
 
         # Verify file still has content
         with open(self.input_file, 'r') as f:
