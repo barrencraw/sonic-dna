@@ -7,6 +7,10 @@ sys.modules["PySide6"] = mock_pyside6
 sys.modules["PySide6.QtWidgets"] = mock_pyside6
 sys.modules["PySide6.QtCore"] = mock_pyside6
 sys.modules["PySide6.QtGui"] = mock_pyside6
+sys.modules["numpy"] = MagicMock()
+sys.modules["scipy"] = MagicMock()
+sys.modules["scipy.io"] = MagicMock()
+sys.modules["scipy.io.wavfile"] = MagicMock()
 sys.modules["torch"] = MagicMock()
 sys.modules["torchaudio"] = MagicMock()
 sys.modules["sounddevice"] = MagicMock()
@@ -103,6 +107,7 @@ class TestAtomicity(unittest.TestCase):
         # We'll mock run_batch to fail
         with patch('main.run_batch', side_effect=PersistenceError("Failed")):
             with patch('main.clear_input_file') as mock_clear:
+                # We need to ensure main.process_once is called with the correct project root
                 with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
                     main.process_once()
 

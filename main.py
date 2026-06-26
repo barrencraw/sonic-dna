@@ -69,10 +69,13 @@ def watch_loop():
     run the batch parser and then clear toSequence.txt. Sleeps 1 second between checks.
     """
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    os.chdir(script_dir)
+    # Stay in CWD if it looks like a project root, otherwise move to script's dir
+    if not (os.path.isdir('data') and os.path.isdir('rules')):
+        os.chdir(script_dir)
 
-    raw_folder = os.path.join(script_dir, 'data', 'raw')
-    output_folder = os.path.join(script_dir, 'data', 'output')
+    cwd = os.getcwd()
+    raw_folder = os.path.join(cwd, 'data', 'raw')
+    output_folder = os.path.join(cwd, 'data', 'output')
     ensure_folder(raw_folder)
     ensure_folder(output_folder)
 
@@ -124,10 +127,13 @@ def process_once():
     writes output JSON+CSV, then exits).
     """
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    os.chdir(script_dir)
+    # Stay in CWD if it looks like a project root, otherwise move to script's dir
+    if not (os.path.isdir('data') and os.path.isdir('rules')):
+        os.chdir(script_dir)
 
-    raw_folder = os.path.join(script_dir, 'data', 'raw')
-    output_folder = os.path.join(script_dir, 'data', 'output')
+    cwd = os.getcwd()
+    raw_folder = os.path.join(cwd, 'data', 'raw')
+    output_folder = os.path.join(cwd, 'data', 'output')
     ensure_folder(raw_folder)
     ensure_folder(output_folder)
 
@@ -177,7 +183,8 @@ def main():
     # Launch PySide6 GUI
     # Ensure working directory is project root
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    os.chdir(script_dir)
+    if not (os.path.isdir('data') and os.path.isdir('rules')):
+        os.chdir(script_dir)
 
     app = QApplication(sys.argv)
 
