@@ -49,6 +49,11 @@ class TestAtomicity(unittest.TestCase):
 
         self.old_cwd = os.getcwd()
         os.chdir(self.test_dir)
+        # Re-ensure folders in the new CWD
+        os.makedirs(os.path.join(self.test_dir, 'data', 'raw'), exist_ok=True)
+        # Create the file again in the NEW current directory just in case
+        with open(self.input_file, 'w') as f:
+            f.write("V100\n")
 
     def tearDown(self):
         os.chdir(self.old_cwd)
@@ -67,7 +72,7 @@ class TestAtomicity(unittest.TestCase):
         with open(json_out, 'r') as f:
             data = json.load(f)
             self.assertEqual(len(data), 1)
-            self.assertEqual(data[0]['dna'], 'V100')
+            self.assertEqual(data[0]['dna_sequence'], 'V100')
 
     def test_crash_during_json_write(self):
         """Simulate a crash during JSON writing. No output files should be created."""
@@ -100,11 +105,13 @@ class TestAtomicity(unittest.TestCase):
             del sys.modules['main']
         import main
 
-        # We'll mock run_batch to fail
-        with patch('main.run_batch', side_effect=PersistenceError("Failed")):
-            with patch('main.clear_input_file') as mock_clear:
-                with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
-                    main.process_once()
+        # Mock os.path.abspath to point to test_dir instead of /app
+        with patch('os.path.abspath', return_value=os.path.join(self.test_dir, 'main.py')):
+            # We'll mock run_batch to fail
+            with patch('main.run_batch', side_effect=PersistenceError("Failed")):
+                with patch('main.clear_input_file') as mock_clear:
+                    with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
+                        main.process_once()
 
                 mock_clear.assert_not_called()
 
