@@ -27,9 +27,13 @@ class TestIdempotency(unittest.TestCase):
         os.makedirs(self.raw_folder, exist_ok=True)
         os.makedirs(self.output_folder, exist_ok=True)
 
-        # Initialize empty ledger
+        # Initialize empty structured ledger
         with open(self.ledger_path, 'w') as f:
-            json.dump({}, f)
+            json.dump({
+                "system_heat": 0.0,
+                "last_processed_timestamp": time.time(),
+                "ledger": {}
+            }, f)
 
     def tearDown(self):
         # Restore backup
@@ -39,6 +43,13 @@ class TestIdempotency(unittest.TestCase):
             # Check if backup exists before moving
             if os.path.exists(self.backup_folder):
                 shutil.move(self.backup_folder, self.data_folder)
+
+    def _get_ledger(self):
+        with open(self.ledger_path, 'r') as f:
+            data = json.load(f)
+            if "ledger" in data:
+                return data["ledger"]
+            return data
 
     def test_double_invocation_same_key(self):
         # DNA for Volume (prefix 'VOL')
@@ -55,8 +66,7 @@ class TestIdempotency(unittest.TestCase):
         self.assertEqual(len(data), 1)
         self.assertEqual(data[0]['dna'], dna)
 
-        with open(self.ledger_path, 'r') as f:
-            ledger = json.load(f)
+        ledger = self._get_ledger()
         self.assertIn(dna, ledger)
         self.assertEqual(ledger[dna]['terminal_outcome'], 'success')
 
@@ -98,8 +108,7 @@ class TestIdempotency(unittest.TestCase):
 
         run_batch() # Success
 
-        with open(self.ledger_path, 'r') as f:
-            ledger = json.load(f)
+        ledger = self._get_ledger()
         self.assertIn(dna, ledger)
 
         # Simulate a crash where the output file was lost but ledger remained (or vice-versa)
