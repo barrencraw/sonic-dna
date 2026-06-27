@@ -7,6 +7,10 @@ sys.modules["PySide6"] = mock_pyside6
 sys.modules["PySide6.QtWidgets"] = mock_pyside6
 sys.modules["PySide6.QtCore"] = mock_pyside6
 sys.modules["PySide6.QtGui"] = mock_pyside6
+sys.modules["numpy"] = MagicMock()
+sys.modules["scipy"] = MagicMock()
+sys.modules["scipy.io"] = MagicMock()
+sys.modules["scipy.io.wavfile"] = MagicMock()
 sys.modules["torch"] = MagicMock()
 sys.modules["torchaudio"] = MagicMock()
 sys.modules["sounddevice"] = MagicMock()
@@ -95,18 +99,29 @@ class TestAtomicity(unittest.TestCase):
 
     def test_watcher_behavior_on_failure(self):
         """Test main.py's logic: if run_batch fails, input file should NOT be cleared."""
-        # Force import after mocks
-        if 'main' in sys.modules:
-            del sys.modules['main']
-        import main
+        # Ensure mocks are in place for binary deps
+        with patch.dict('sys.modules', {
+            'PySide6': MagicMock(),
+            'PySide6.QtWidgets': MagicMock(),
+            'PySide6.QtCore': MagicMock(),
+            'PySide6.QtGui': MagicMock(),
+            'numpy': MagicMock(),
+            'scipy': MagicMock(),
+            'scipy.io': MagicMock(),
+            'scipy.io.wavfile': MagicMock()
+        }):
+            # Import main locally to ensure it uses mocks
+            import main
+            import importlib
+            importlib.reload(main)
 
-        # We'll mock run_batch to fail
-        with patch('main.run_batch', side_effect=PersistenceError("Failed")):
-            with patch('main.clear_input_file') as mock_clear:
-                with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
-                    main.process_once()
+            # We'll mock run_batch to fail
+            with patch('main.run_batch', side_effect=PersistenceError("Failed")):
+                with patch('main.clear_input_file') as mock_clear:
+                    with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
+                        main.process_once()
 
-                mock_clear.assert_not_called()
+                    mock_clear.assert_not_called()
 
         # Verify file still has content
         with open(self.input_file, 'r') as f:
