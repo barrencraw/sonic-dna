@@ -32,6 +32,7 @@ import sys
 import time
 import threading
 import argparse
+import uuid
 
 # ─── Import the batch parser and the GUI window ───────────────────────────────
 from utils.dna_ui import main as run_batch
@@ -90,10 +91,11 @@ def watch_loop():
                 print(f"[{timestamp}] New DNA detected → running parser…")
 
                 try:
-                    run_batch()
+                    correlation_id = str(uuid.uuid4())
+                    run_batch(correlation_id=correlation_id)
                     # Only clear the input file if run_batch() succeeds
                     clear_input_file(input_file)
-                    print(f"[{timestamp}] Parsing complete. Cleared toSequence.txt.\n")
+                    print(f"[{timestamp}] Parsing complete (CID: {correlation_id}). Cleared toSequence.txt.\n")
                 except Exception as e:
                     # Classify errors
                     from utils.dna_ui import DNAProcessingError
@@ -138,8 +140,9 @@ def process_once():
 
     print("[Once‐Runner] Processing all DNA strings once…")
     try:
-        run_batch()
-        print("[Once‐Runner] Done.")
+        correlation_id = str(uuid.uuid4())
+        run_batch(correlation_id=correlation_id)
+        print(f"[Once‐Runner] Done (CID: {correlation_id}).")
     except Exception as e:
         from utils.dna_ui import DNAProcessingError
         if isinstance(e, DNAProcessingError):
