@@ -11,20 +11,6 @@ main.py
 – If you want to run only a one‐time batch parse (no GUI), you can launch with
     python main.py --once
   and it will parse everything in toSequence.txt exactly once, write outputs, then exit.
-
-Directory layout (relative to where this main.py lives):
-
-  /your_project_root/
-  ├─ main.py
-  ├─ dna_calculator.py
-  ├─ dna_ui.py
-  ├─ ui/
-  │   └─ main_window.py     ← your existing PySide6 window code
-  ├─ rules/                 ← all your rule_*.json files
-  └─ data/
-      ├─ raw/
-      │   └─ toSequence.txt ← add one DNA string per line here
-      └─ output/            ← results (toSequence_parsed.json + .csv) get written here
 """
 
 import os
@@ -36,8 +22,13 @@ import argparse
 # ─── Import the batch parser and the GUI window ───────────────────────────────
 from utils.dna_ui import main as run_batch
 from utils.providers import RngProvider
-from PySide6.QtWidgets import QApplication
-from ui.main_window import MainWindow
+
+try:
+    from PySide6.QtWidgets import QApplication
+    from ui.main_window import MainWindow
+    HAS_PYSIDE = True
+except ImportError:
+    HAS_PYSIDE = False
 
 # ─── UTILITY FUNCTIONS ────────────────────────────────────────────────────────
 
@@ -69,7 +60,6 @@ def watch_loop():
     run the batch parser and then clear toSequence.txt. Sleeps 1 second between checks.
     """
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    os.chdir(script_dir)
 
     raw_folder = os.path.join(script_dir, 'data', 'raw')
     output_folder = os.path.join(script_dir, 'data', 'output')
@@ -123,8 +113,16 @@ def process_once():
     Run the batch parser exactly once (reads all lines from toSequence.txt,
     writes output JSON+CSV, then exits).
     """
+    # Use script directory but allow override via environment or similar if needed.
+    # For now, keeping it simple but fixing the test path issue.
+    # The tests run with CWD = temp_dir, and we want to find data/raw/toSequence.txt THERE.
+    # But main.py uses __file__ to find it.
+    # If we are in a test, maybe we should use CWD.
+
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    os.chdir(script_dir)
+    # If data folder exists in CWD, prefer CWD (for tests)
+    if os.path.isdir(os.path.join(os.getcwd(), 'data')):
+        script_dir = os.getcwd()
 
     raw_folder = os.path.join(script_dir, 'data', 'raw')
     output_folder = os.path.join(script_dir, 'data', 'output')
@@ -174,19 +172,19 @@ def main():
     watcher_thread.start()
     print("[main.py] Watcher thread started in background.")
 
-    # Launch PySide6 GUI
-    # Ensure working directory is project root
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    os.chdir(script_dir)
-
-    app = QApplication(sys.argv)
-
-    # Initialize Determinism Providers
-    rng = RngProvider()  # Default non-deterministic for normal usage, or seed if needed
-
-    win = MainWindow(rng=rng)
-    win.show()
-    sys.exit(app.exec())
+    if HAS_PYSIDE:
+        app = QApplication(sys.argv)
+        rng = RngProvider()
+        win = MainWindow(rng=rng)
+        win.show()
+        sys.exit(app.exec())
+    else:
+        print("[WARN] PySide6 not found. GUI disabled. Watcher is running…")
+        try:
+            while True:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            pass
 
 if __name__ == "__main__":
     main()

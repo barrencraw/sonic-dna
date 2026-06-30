@@ -10,6 +10,10 @@ sys.modules["PySide6.QtGui"] = mock_pyside6
 sys.modules["torch"] = MagicMock()
 sys.modules["torchaudio"] = MagicMock()
 sys.modules["sounddevice"] = MagicMock()
+sys.modules["numpy"] = MagicMock()
+sys.modules["scipy"] = MagicMock()
+sys.modules["scipy.io"] = MagicMock()
+sys.modules["scipy.io.wavfile"] = MagicMock()
 
 import unittest
 import os
@@ -50,7 +54,12 @@ class TestAtomicity(unittest.TestCase):
         self.old_cwd = os.getcwd()
         os.chdir(self.test_dir)
 
+        # Patch os.path.abspath to correctly resolve project root in tests
+        self.abspath_patcher = patch('os.path.abspath', side_effect=lambda x: os.path.join(self.test_dir, x) if not os.path.isabs(x) else x)
+        self.abspath_patcher.start()
+
     def tearDown(self):
+        self.abspath_patcher.stop()
         os.chdir(self.old_cwd)
         shutil.rmtree(self.test_dir)
 
