@@ -27,9 +27,13 @@ class TestIdempotency(unittest.TestCase):
         os.makedirs(self.raw_folder, exist_ok=True)
         os.makedirs(self.output_folder, exist_ok=True)
 
-        # Initialize empty ledger
+        # Initialize empty ledger in NEW format
         with open(self.ledger_path, 'w') as f:
-            json.dump({}, f)
+            json.dump({
+                "system_heat": 0.0,
+                "last_processed_timestamp": time.time(),
+                "ledger": {}
+            }, f)
 
     def tearDown(self):
         # Restore backup
@@ -56,9 +60,9 @@ class TestIdempotency(unittest.TestCase):
         self.assertEqual(data[0]['dna'], dna)
 
         with open(self.ledger_path, 'r') as f:
-            ledger = json.load(f)
-        self.assertIn(dna, ledger)
-        self.assertEqual(ledger[dna]['terminal_outcome'], 'success')
+            state = json.load(f)
+        self.assertIn(dna, state["ledger"])
+        self.assertEqual(state["ledger"][dna]['terminal_outcome'], 'success')
 
         # 2. Second invocation with same DNA
         with open(self.input_file, 'w') as f:
@@ -99,14 +103,11 @@ class TestIdempotency(unittest.TestCase):
         run_batch() # Success
 
         with open(self.ledger_path, 'r') as f:
-            ledger = json.load(f)
-        self.assertIn(dna, ledger)
+            state = json.load(f)
+        self.assertIn(dna, state["ledger"])
 
         # Simulate a crash where the output file was lost but ledger remained (or vice-versa)
         # If output file is lost, next run should NOT re-process if it's in the ledger.
-        # WAIT: The requirement is "retry after transient failure → eventual consistency without corruption".
-        # If the output file is cumulative and we lose it, but keep the ledger, we might miss the data.
-        # But idempotency usually means "don't do it again if you already did it".
 
         # Let's test if it handles corrupted output file gracefully.
         with open(self.json_output, 'w') as f:
