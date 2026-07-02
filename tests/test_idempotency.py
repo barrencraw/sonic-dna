@@ -42,29 +42,29 @@ class TestIdempotency(unittest.TestCase):
 
     def test_double_invocation_same_key(self):
         # DNA for Volume (prefix 'VOL')
-        dna = "VOL08900750712"
+        dna_sequence = "VOL08900750712"
 
         # 1. First invocation
         with open(self.input_file, 'w') as f:
-            f.write(dna + "\n")
+            f.write(dna_sequence + "\n")
 
-        run_batch()
+        run_batch(correlation_id="test-first")
 
         with open(self.json_output, 'r') as f:
             data = json.load(f)
         self.assertEqual(len(data), 1)
-        self.assertEqual(data[0]['dna'], dna)
+        self.assertEqual(data[0]['dna_sequence'], dna_sequence)
 
         with open(self.ledger_path, 'r') as f:
             ledger = json.load(f)
-        self.assertIn(dna, ledger)
-        self.assertEqual(ledger[dna]['terminal_outcome'], 'success')
+        self.assertIn(dna_sequence, ledger)
+        self.assertEqual(ledger[dna_sequence]['terminal_outcome'], 'success')
 
         # 2. Second invocation with same DNA
         with open(self.input_file, 'w') as f:
-            f.write(dna + "\n")
+            f.write(dna_sequence + "\n")
 
-        run_batch()
+        run_batch(correlation_id="test-second")
 
         # Verify no duplicate entry in output
         with open(self.json_output, 'r') as f:
@@ -78,29 +78,29 @@ class TestIdempotency(unittest.TestCase):
         with open(self.input_file, 'w') as f:
             f.write(f"{dna1}\n{dna1}\n{dna2}\n")
 
-        run_batch()
+        run_batch(correlation_id="test-mixed")
 
         with open(self.json_output, 'r') as f:
             data = json.load(f)
         # It should process dna1 (once) and dna2 (once)
         self.assertEqual(len(data), 2, "Should have exactly 2 entries")
-        dnas = [entry['dna'] for entry in data]
+        dnas = [entry['dna_sequence'] for entry in data]
         self.assertIn(dna1, dnas)
         self.assertIn(dna2, dnas)
 
     def test_retry_after_transient_failure(self):
         # We'll simulate a transient failure by corrupting the output after a successful process
         # and then re-running.
-        dna = "VOL08900750712"
+        dna_sequence = "VOL08900750712"
 
         with open(self.input_file, 'w') as f:
-            f.write(dna + "\n")
+            f.write(dna_sequence + "\n")
 
-        run_batch() # Success
+        run_batch(correlation_id="test-retry-1") # Success
 
         with open(self.ledger_path, 'r') as f:
             ledger = json.load(f)
-        self.assertIn(dna, ledger)
+        self.assertIn(dna_sequence, ledger)
 
         # Simulate a crash where the output file was lost but ledger remained (or vice-versa)
         # If output file is lost, next run should NOT re-process if it's in the ledger.
@@ -116,7 +116,7 @@ class TestIdempotency(unittest.TestCase):
         with open(self.input_file, 'w') as f:
             f.write(new_dna + "\n")
 
-        run_batch() # This should load the corrupted file, reset it to [], and add the new_dna
+        run_batch(correlation_id="test-retry-2") # This should load the corrupted file, reset it to [], and add the new_dna
 
         with open(self.json_output, 'r') as f:
             data = json.load(f)
@@ -124,7 +124,7 @@ class TestIdempotency(unittest.TestCase):
         # Since VOL08900750712 was in the ledger, it was NOT re-processed.
         # Only VOL00000000000 is in the new output.
         self.assertEqual(len(data), 1)
-        self.assertEqual(data[0]['dna'], new_dna)
+        self.assertEqual(data[0]['dna_sequence'], new_dna)
 
 if __name__ == '__main__':
     unittest.main()
