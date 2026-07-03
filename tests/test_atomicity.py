@@ -11,6 +11,20 @@ sys.modules["torch"] = MagicMock()
 sys.modules["torchaudio"] = MagicMock()
 sys.modules["sounddevice"] = MagicMock()
 
+# Check if numpy is actually available in the environment
+try:
+    import numpy as np
+except ImportError:
+    # Only mock if not present
+    if "numpy" not in sys.modules:
+        sys.modules["numpy"] = MagicMock()
+    if "scipy" not in sys.modules:
+        sys.modules["scipy"] = MagicMock()
+    if "scipy.io" not in sys.modules:
+        sys.modules["scipy.io"] = MagicMock()
+    if "scipy.io.wavfile" not in sys.modules:
+        sys.modules["scipy.io.wavfile"] = MagicMock()
+
 import unittest
 import os
 import shutil
@@ -98,10 +112,12 @@ class TestAtomicity(unittest.TestCase):
         # Force import after mocks
         if 'main' in sys.modules:
             del sys.modules['main']
-        import main
 
-        # We'll mock run_batch to fail
+        # Mocking run_batch in the modules where it is imported
         with patch('main.run_batch', side_effect=PersistenceError("Failed")):
+            import main
+            # Need to fix the main.__file__ so it resolves relative paths correctly in test dir
+            main.__file__ = os.path.join(self.test_dir, 'main.py')
             with patch('main.clear_input_file') as mock_clear:
                 with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
                     main.process_once()
