@@ -36,8 +36,12 @@ import argparse
 # ─── Import the batch parser and the GUI window ───────────────────────────────
 from utils.dna_ui import main as run_batch
 from utils.providers import RngProvider
-from PySide6.QtWidgets import QApplication
-from ui.main_window import MainWindow
+try:
+    from PySide6.QtWidgets import QApplication
+    from ui.main_window import MainWindow
+    HAS_PYSIDE = True
+except ImportError:
+    HAS_PYSIDE = False
 
 # ─── UTILITY FUNCTIONS ────────────────────────────────────────────────────────
 
@@ -173,6 +177,14 @@ def main():
     watcher_thread = threading.Thread(target=watch_loop, daemon=True)
     watcher_thread.start()
     print("[main.py] Watcher thread started in background.")
+
+    if not HAS_PYSIDE:
+        print("[main.py] PySide6 not available. GUI launch skipped. Watcher remains active.")
+        try:
+            while True:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            return
 
     # Launch PySide6 GUI
     # Ensure working directory is project root
