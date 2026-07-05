@@ -1,3 +1,13 @@
+import sys
+from unittest.mock import MagicMock
+
+# If numpy is a MagicMock, it means some other test (like test_atomicity)
+# injected it into sys.modules. We need to remove it so we can import the real one.
+if "numpy" in sys.modules and isinstance(sys.modules["numpy"], MagicMock):
+    del sys.modules["numpy"]
+if "scipy" in sys.modules and isinstance(sys.modules["scipy"], MagicMock):
+    del sys.modules["scipy"]
+
 import numpy as np
 import pytest
 from ui.music_panel import gen_wave
