@@ -98,11 +98,18 @@ class TestAtomicity(unittest.TestCase):
         # Force import after mocks
         if 'main' in sys.modules:
             del sys.modules['main']
-        import main
+
+        # Mock dependencies in main before import if necessary,
+        # but here we just need to ensure RngProvider and QApplication are handled.
+        with patch('utils.providers.RngProvider'), patch('PySide6.QtWidgets.QApplication'):
+            import main
+            # Ensure main.py thinks its home is our test directory
+            main.__file__ = os.path.join(self.test_dir, 'main.py')
 
         # We'll mock run_batch to fail
         with patch('main.run_batch', side_effect=PersistenceError("Failed")):
             with patch('main.clear_input_file') as mock_clear:
+                # We need to mock the correlation_id being passed now
                 with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
                     main.process_once()
 
