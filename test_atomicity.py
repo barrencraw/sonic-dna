@@ -10,6 +10,13 @@ sys.modules["PySide6.QtGui"] = mock_pyside6
 sys.modules["torch"] = MagicMock()
 sys.modules["torchaudio"] = MagicMock()
 sys.modules["sounddevice"] = MagicMock()
+sys.modules["watchdog"] = MagicMock()
+sys.modules["watchdog.observers"] = MagicMock()
+sys.modules["watchdog.events"] = MagicMock()
+sys.modules["numpy"] = MagicMock()
+sys.modules["scipy"] = MagicMock()
+sys.modules["scipy.io"] = MagicMock()
+sys.modules["scipy.io.wavfile"] = MagicMock()
 
 import unittest
 import os
@@ -99,13 +106,20 @@ class TestAtomicity(unittest.TestCase):
         if 'main' in sys.modules:
             del sys.modules['main']
         import main
+        # Set main.__file__ to our test directory so it finds the data folder there
+        main.__file__ = os.path.join(self.test_dir, "main.py")
 
         # We'll mock run_batch to fail
+        # Ensure we are patching the run_batch that process_once actually calls
         with patch('main.run_batch', side_effect=PersistenceError("Failed")):
             with patch('main.clear_input_file') as mock_clear:
-                with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
+                # process_once uses os.chdir(script_dir). We need to make sure it doesn't fail on paths.
+                # Since we already chdir to test_dir in setUp, and input_file is there, we are fine.
+
+                with self.assertRaises(SystemExit) as cm: # process_once calls sys.exit(1) on failure
                     main.process_once()
 
+                self.assertEqual(cm.exception.code, 1)
                 mock_clear.assert_not_called()
 
         # Verify file still has content
