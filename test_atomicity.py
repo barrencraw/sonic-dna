@@ -10,6 +10,13 @@ sys.modules["PySide6.QtGui"] = mock_pyside6
 sys.modules["torch"] = MagicMock()
 sys.modules["torchaudio"] = MagicMock()
 sys.modules["sounddevice"] = MagicMock()
+sys.modules["numpy"] = MagicMock()
+sys.modules["scipy"] = MagicMock()
+sys.modules["scipy.io"] = MagicMock()
+sys.modules["scipy.io.wavfile"] = MagicMock()
+sys.modules["watchdog"] = MagicMock()
+sys.modules["watchdog.observers"] = MagicMock()
+sys.modules["watchdog.events"] = MagicMock()
 
 import unittest
 import os
@@ -50,6 +57,10 @@ class TestAtomicity(unittest.TestCase):
         self.old_cwd = os.getcwd()
         os.chdir(self.test_dir)
 
+        # We need to make sure main.py uses our test_dir
+        # Some logic in main.py uses os.path.abspath(__file__)
+        # but we are calling functions directly.
+
     def tearDown(self):
         os.chdir(self.old_cwd)
         shutil.rmtree(self.test_dir)
@@ -71,7 +82,8 @@ class TestAtomicity(unittest.TestCase):
 
     def test_crash_during_json_write(self):
         """Simulate a crash during JSON writing. No output files should be created."""
-        with patch('json.dump', side_effect=IOError("Disk Full")):
+        # save_ledger is called first, let's patch it to fail
+        with patch('utils.dna_ui.save_ledger', side_effect=PersistenceError("Disk Full")):
             with self.assertRaises(PersistenceError):
                 run_batch()
 
@@ -83,6 +95,8 @@ class TestAtomicity(unittest.TestCase):
 
     def test_crash_during_rename(self):
         """Simulate a crash/failure during the atomic rename. No output files should be created/updated."""
+        # os.replace is used for both ledger and output files.
+        # Patching it to fail.
         with patch('os.replace', side_effect=OSError("Permission Denied")):
             with self.assertRaises(PersistenceError):
                 run_batch()
@@ -100,12 +114,18 @@ class TestAtomicity(unittest.TestCase):
             del sys.modules['main']
         import main
 
+        # Patch main.__file__ so it resolves relative paths to our test_dir
+        main.__file__ = os.path.join(self.test_dir, 'main.py')
+
         # We'll mock run_batch to fail
         with patch('main.run_batch', side_effect=PersistenceError("Failed")):
             with patch('main.clear_input_file') as mock_clear:
-                with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
+                # process_once calls run_batch and then print/return.
+                # In main.py: process_once calls sys.exit(1) on failure.
+                with self.assertRaises(SystemExit) as cm:
                     main.process_once()
 
+                self.assertEqual(cm.exception.code, 1)
                 mock_clear.assert_not_called()
 
         # Verify file still has content
