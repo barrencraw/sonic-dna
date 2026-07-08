@@ -10,6 +10,13 @@ sys.modules["PySide6.QtGui"] = mock_pyside6
 sys.modules["torch"] = MagicMock()
 sys.modules["torchaudio"] = MagicMock()
 sys.modules["sounddevice"] = MagicMock()
+sys.modules["numpy"] = MagicMock()
+sys.modules["scipy"] = MagicMock()
+sys.modules["scipy.io"] = MagicMock()
+sys.modules["scipy.io.wavfile"] = MagicMock()
+sys.modules["watchdog"] = MagicMock()
+sys.modules["watchdog.observers"] = MagicMock()
+sys.modules["watchdog.events"] = MagicMock()
 
 import unittest
 import os
@@ -49,6 +56,7 @@ class TestAtomicity(unittest.TestCase):
 
         self.old_cwd = os.getcwd()
         os.chdir(self.test_dir)
+        self.ledger_path = os.path.join(self.data_dir, 'processed_ledger.json')
 
     def tearDown(self):
         os.chdir(self.old_cwd)
@@ -63,15 +71,21 @@ class TestAtomicity(unittest.TestCase):
 
         self.assertTrue(os.path.exists(json_out))
         self.assertTrue(os.path.exists(csv_out))
+        self.assertTrue(os.path.exists(self.ledger_path))
 
         with open(json_out, 'r') as f:
             data = json.load(f)
             self.assertEqual(len(data), 1)
             self.assertEqual(data[0]['dna'], 'V100')
 
+        with open(self.ledger_path, 'r') as f:
+            ledger = json.load(f)
+            self.assertIn('V100', ledger)
+
     def test_crash_during_json_write(self):
-        """Simulate a crash during JSON writing. No output files should be created."""
-        with patch('json.dump', side_effect=IOError("Disk Full")):
+        """Simulate a crash during JSON writing. No output files should be created, including ledger."""
+        # Patch json.dump only when called within dna_ui.py to avoid affecting rule loading
+        with patch('utils.dna_ui.json.dump', side_effect=IOError("Disk Full")):
             with self.assertRaises(PersistenceError):
                 run_batch()
 
@@ -80,6 +94,7 @@ class TestAtomicity(unittest.TestCase):
 
         self.assertFalse(os.path.exists(json_out))
         self.assertFalse(os.path.exists(csv_out))
+        self.assertFalse(os.path.exists(self.ledger_path))
 
     def test_crash_during_rename(self):
         """Simulate a crash/failure during the atomic rename. No output files should be created/updated."""
@@ -92,6 +107,7 @@ class TestAtomicity(unittest.TestCase):
 
         self.assertFalse(os.path.exists(json_out))
         self.assertFalse(os.path.exists(csv_out))
+        self.assertFalse(os.path.exists(self.ledger_path))
 
     def test_watcher_behavior_on_failure(self):
         """Test main.py's logic: if run_batch fails, input file should NOT be cleared."""
@@ -99,6 +115,9 @@ class TestAtomicity(unittest.TestCase):
         if 'main' in sys.modules:
             del sys.modules['main']
         import main
+
+        # Set main.__file__ so it resolves relative paths correctly
+        main.__file__ = os.path.join(self.test_dir, 'main.py')
 
         # We'll mock run_batch to fail
         with patch('main.run_batch', side_effect=PersistenceError("Failed")):
