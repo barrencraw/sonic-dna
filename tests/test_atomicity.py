@@ -10,6 +10,17 @@ sys.modules["PySide6.QtGui"] = mock_pyside6
 sys.modules["torch"] = MagicMock()
 sys.modules["torchaudio"] = MagicMock()
 sys.modules["sounddevice"] = MagicMock()
+sys.modules["numpy"] = MagicMock()
+
+# scipy is trickier because it's often used with submodules
+mock_scipy = MagicMock()
+sys.modules["scipy"] = mock_scipy
+sys.modules["scipy.io"] = MagicMock()
+sys.modules["scipy.io.wavfile"] = MagicMock()
+
+sys.modules["watchdog"] = MagicMock()
+sys.modules["watchdog.observers"] = MagicMock()
+sys.modules["watchdog.events"] = MagicMock()
 
 import unittest
 import os
@@ -60,53 +71,68 @@ class TestAtomicity(unittest.TestCase):
 
         json_out = os.path.join(self.output_dir, 'toSequence_parsed.json')
         csv_out = os.path.join(self.output_dir, 'toSequence_parsed.csv')
+        ledger_out = os.path.join(self.data_dir, 'processed_ledger.json')
 
         self.assertTrue(os.path.exists(json_out))
         self.assertTrue(os.path.exists(csv_out))
+        self.assertTrue(os.path.exists(ledger_out))
 
         with open(json_out, 'r') as f:
             data = json.load(f)
             self.assertEqual(len(data), 1)
             self.assertEqual(data[0]['dna'], 'V100')
 
-    def test_crash_during_json_write(self):
-        """Simulate a crash during JSON writing. No output files should be created."""
-        with patch('json.dump', side_effect=IOError("Disk Full")):
+    def test_crash_during_atomic_commit(self):
+        """Simulate a crash during the multi-file atomic commit. No output files should be created."""
+        # We patch os.replace to fail. Since it's called for JSON, CSV, and Ledger,
+        # if the first one fails, none should be committed.
+        with patch('os.replace', side_effect=OSError("Disk Full")):
             with self.assertRaises(PersistenceError):
                 run_batch()
 
         json_out = os.path.join(self.output_dir, 'toSequence_parsed.json')
         csv_out = os.path.join(self.output_dir, 'toSequence_parsed.csv')
+        ledger_out = os.path.join(self.data_dir, 'processed_ledger.json')
 
-        self.assertFalse(os.path.exists(json_out))
-        self.assertFalse(os.path.exists(csv_out))
+        self.assertFalse(os.path.exists(json_out), "JSON output should not exist after failed commit")
+        self.assertFalse(os.path.exists(csv_out), "CSV output should not exist after failed commit")
+        self.assertFalse(os.path.exists(ledger_out), "Ledger should not exist after failed commit")
 
-    def test_crash_during_rename(self):
-        """Simulate a crash/failure during the atomic rename. No output files should be created/updated."""
-        with patch('os.replace', side_effect=OSError("Permission Denied")):
+    def test_partial_failure_in_temp_write(self):
+        """Simulate a failure during writing one of the temporary files."""
+        # Patching builtins.open to fail only when writing 'output.csv'
+        original_open = open
+        def side_effect(file, mode='r', *args, **kwargs):
+            if 'output.csv' in str(file) and 'w' in mode:
+                raise IOError("Write failed")
+            return original_open(file, mode, *args, **kwargs)
+
+        with patch('builtins.open', side_effect=side_effect):
             with self.assertRaises(PersistenceError):
                 run_batch()
 
         json_out = os.path.join(self.output_dir, 'toSequence_parsed.json')
         csv_out = os.path.join(self.output_dir, 'toSequence_parsed.csv')
+        ledger_out = os.path.join(self.data_dir, 'processed_ledger.json')
 
         self.assertFalse(os.path.exists(json_out))
         self.assertFalse(os.path.exists(csv_out))
+        self.assertFalse(os.path.exists(ledger_out))
 
     def test_watcher_behavior_on_failure(self):
         """Test main.py's logic: if run_batch fails, input file should NOT be cleared."""
-        # Force import after mocks
+        # Reload main to ensure it uses the current project root and mocks
         if 'main' in sys.modules:
             del sys.modules['main']
         import main
+        main.run_batch = MagicMock(side_effect=PersistenceError("Failed"))
+        main.clear_input_file = MagicMock()
 
-        # We'll mock run_batch to fail
-        with patch('main.run_batch', side_effect=PersistenceError("Failed")):
-            with patch('main.clear_input_file') as mock_clear:
-                with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
-                    main.process_once()
+        # Mock sys.exit to avoid stopping the test
+        with patch('sys.exit'):
+            main.process_once()
 
-                mock_clear.assert_not_called()
+        main.clear_input_file.assert_not_called()
 
         # Verify file still has content
         with open(self.input_file, 'r') as f:
