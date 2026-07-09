@@ -71,7 +71,14 @@ class TestAtomicity(unittest.TestCase):
 
     def test_crash_during_json_write(self):
         """Simulate a crash during JSON writing. No output files should be created."""
-        with patch('json.dump', side_effect=IOError("Disk Full")):
+        # We need to be careful NOT to mock json.dump used during Rule loading.
+        # But run_batch loads rules first.
+
+        # Patching inside the context to avoid affecting setup
+        with patch('json.dump', side_effect=IOError("Disk Full")) as mock_dump:
+            # We must ensure it doesn't fail on Rule loading if that happens again
+            # But DNACalculator is already instantiated in run_batch.
+            # Wait, Rule.__init__ uses json.load, not json.dump. So we are safe.
             with self.assertRaises(PersistenceError):
                 run_batch()
 
@@ -83,7 +90,13 @@ class TestAtomicity(unittest.TestCase):
 
     def test_crash_during_rename(self):
         """Simulate a crash/failure during the atomic rename. No output files should be created/updated."""
-        with patch('os.replace', side_effect=OSError("Permission Denied")):
+        # We only want to fail on output renames, not other potential renames
+        def side_effect(src, dst):
+            if 'toSequence_parsed' in dst or 'processed_ledger' in dst:
+                raise OSError("Permission Denied")
+            return shutil.move(src, dst) # Use move instead of rename for safety if cross-device
+
+        with patch('os.replace', side_effect=side_effect):
             with self.assertRaises(PersistenceError):
                 run_batch()
 
@@ -103,10 +116,11 @@ class TestAtomicity(unittest.TestCase):
         # We'll mock run_batch to fail
         with patch('main.run_batch', side_effect=PersistenceError("Failed")):
             with patch('main.clear_input_file') as mock_clear:
-                with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
-                    main.process_once()
+                with patch('main.__file__', os.path.join(self.test_dir, 'main.py')):
+                    with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
+                        main.process_once()
 
-                mock_clear.assert_not_called()
+                    mock_clear.assert_not_called()
 
         # Verify file still has content
         with open(self.input_file, 'r') as f:
