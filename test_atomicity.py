@@ -98,12 +98,17 @@ class TestAtomicity(unittest.TestCase):
         # Force import after mocks
         if 'main' in sys.modules:
             del sys.modules['main']
+
         import main
+        # Patch __file__ after import
+        main.__file__ = os.path.join(self.test_dir, "main.py")
 
         # We'll mock run_batch to fail
         with patch('main.run_batch', side_effect=PersistenceError("Failed")):
             with patch('main.clear_input_file') as mock_clear:
-                with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
+                # Use a patch for sys.exit to avoid actually exiting the test runner if it's called
+                # but SystemExit check should still work.
+                with self.assertRaises(SystemExit):
                     main.process_once()
 
                 mock_clear.assert_not_called()
