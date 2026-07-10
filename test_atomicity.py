@@ -10,6 +10,13 @@ sys.modules["PySide6.QtGui"] = mock_pyside6
 sys.modules["torch"] = MagicMock()
 sys.modules["torchaudio"] = MagicMock()
 sys.modules["sounddevice"] = MagicMock()
+sys.modules["watchdog"] = MagicMock()
+sys.modules["watchdog.observers"] = MagicMock()
+sys.modules["watchdog.events"] = MagicMock()
+sys.modules["numpy"] = MagicMock()
+sys.modules["scipy"] = MagicMock()
+sys.modules["scipy.io"] = MagicMock()
+sys.modules["scipy.io.wavfile"] = MagicMock()
 
 import unittest
 import os
@@ -71,7 +78,14 @@ class TestAtomicity(unittest.TestCase):
 
     def test_crash_during_json_write(self):
         """Simulate a crash during JSON writing. No output files should be created."""
-        with patch('json.dump', side_effect=IOError("Disk Full")):
+        # Use a more targeted patch to avoid breaking rule loading
+        original_dump = json.dump
+        def side_effect(obj, fp, **kwargs):
+            if hasattr(fp, 'name') and 'output.json' in fp.name:
+                raise IOError("Disk Full")
+            return original_dump(obj, fp, **kwargs)
+
+        with patch('json.dump', side_effect=side_effect):
             with self.assertRaises(PersistenceError):
                 run_batch()
 
@@ -99,6 +113,7 @@ class TestAtomicity(unittest.TestCase):
         if 'main' in sys.modules:
             del sys.modules['main']
         import main
+        main.__file__ = os.path.join(self.test_dir, 'main.py')
 
         # We'll mock run_batch to fail
         with patch('main.run_batch', side_effect=PersistenceError("Failed")):
