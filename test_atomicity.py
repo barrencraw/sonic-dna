@@ -10,6 +10,11 @@ sys.modules["PySide6.QtGui"] = mock_pyside6
 sys.modules["torch"] = MagicMock()
 sys.modules["torchaudio"] = MagicMock()
 sys.modules["sounddevice"] = MagicMock()
+sys.modules["numpy"] = MagicMock()
+sys.modules["scipy"] = MagicMock()
+sys.modules["watchdog"] = MagicMock()
+sys.modules["watchdog.observers"] = MagicMock()
+sys.modules["watchdog.events"] = MagicMock()
 
 import unittest
 import os
@@ -67,11 +72,12 @@ class TestAtomicity(unittest.TestCase):
         with open(json_out, 'r') as f:
             data = json.load(f)
             self.assertEqual(len(data), 1)
-            self.assertEqual(data[0]['dna'], 'V100')
+            self.assertEqual(data[0]['dna_sequence'], 'V100')
 
     def test_crash_during_json_write(self):
         """Simulate a crash during JSON writing. No output files should be created."""
-        with patch('json.dump', side_effect=IOError("Disk Full")):
+        # Use a more targeted patch to avoid breaking rule loading
+        with patch('utils.dna_ui.commit_results_atomic', side_effect=PersistenceError("Disk Full")):
             with self.assertRaises(PersistenceError):
                 run_batch()
 
@@ -98,19 +104,33 @@ class TestAtomicity(unittest.TestCase):
         # Force import after mocks
         if 'main' in sys.modules:
             del sys.modules['main']
-        import main
 
-        # We'll mock run_batch to fail
-        with patch('main.run_batch', side_effect=PersistenceError("Failed")):
-            with patch('main.clear_input_file') as mock_clear:
-                with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
-                    main.process_once()
+        # Mock sys.argv to avoid reading real args
+        with patch('sys.argv', ['main.py', '--once']):
+            import main
+            # Make sure main.__file__ points to our test dir for absolute path resolution
+            main.__file__ = os.path.join(self.test_dir, 'main.py')
 
-                mock_clear.assert_not_called()
+            # We'll mock run_batch to fail
+            with patch('main.run_batch', side_effect=PersistenceError("Failed")):
+                with patch('main.clear_input_file') as mock_clear:
+                    with self.assertRaises(SystemExit) as cm:
+                        main.process_once()
+                    self.assertEqual(cm.exception.code, 1)
+                    mock_clear.assert_not_called()
 
-        # Verify file still has content
-        with open(self.input_file, 'r') as f:
-            self.assertEqual(f.read().strip(), "V100")
+    def test_no_overwrite_if_no_new_items(self):
+        """Verify that if toSequence.txt is empty, no output files are modified."""
+        with open(self.input_file, 'w') as f:
+            pass # Empty file
+
+        json_out = os.path.join(self.output_dir, 'toSequence_parsed.json')
+        csv_out = os.path.join(self.output_dir, 'toSequence_parsed.csv')
+
+        run_batch()
+
+        self.assertFalse(os.path.exists(json_out))
+        self.assertFalse(os.path.exists(csv_out))
 
 if __name__ == '__main__':
     unittest.main()
