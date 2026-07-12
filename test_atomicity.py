@@ -32,6 +32,8 @@ class TestAtomicity(unittest.TestCase):
         os.makedirs(self.output_dir)
         os.makedirs(self.rules_dir)
 
+        self.raw_dir = os.path.join(self.test_dir, 'data', 'raw')
+        os.makedirs(self.raw_dir, exist_ok=True)
         self.input_file = os.path.join(self.raw_dir, 'toSequence.txt')
         with open(self.input_file, 'w') as f:
             f.write("V100\n")
@@ -56,7 +58,7 @@ class TestAtomicity(unittest.TestCase):
 
     def test_successful_parsing(self):
         """Verify that parsing works correctly under normal conditions."""
-        run_batch()
+        run_batch(correlation_id="test-atomicity-success", actor_id="test-runner")
 
         json_out = os.path.join(self.output_dir, 'toSequence_parsed.json')
         csv_out = os.path.join(self.output_dir, 'toSequence_parsed.csv')
@@ -67,13 +69,13 @@ class TestAtomicity(unittest.TestCase):
         with open(json_out, 'r') as f:
             data = json.load(f)
             self.assertEqual(len(data), 1)
-            self.assertEqual(data[0]['dna'], 'V100')
+            self.assertEqual(data[0]['dna_sequence'], 'V100')
 
     def test_crash_during_json_write(self):
         """Simulate a crash during JSON writing. No output files should be created."""
         with patch('json.dump', side_effect=IOError("Disk Full")):
             with self.assertRaises(PersistenceError):
-                run_batch()
+                run_batch(correlation_id="test-crash-json", actor_id="test-runner")
 
         json_out = os.path.join(self.output_dir, 'toSequence_parsed.json')
         csv_out = os.path.join(self.output_dir, 'toSequence_parsed.csv')
@@ -85,7 +87,7 @@ class TestAtomicity(unittest.TestCase):
         """Simulate a crash/failure during the atomic rename. No output files should be created/updated."""
         with patch('os.replace', side_effect=OSError("Permission Denied")):
             with self.assertRaises(PersistenceError):
-                run_batch()
+                run_batch(correlation_id="test-crash-rename", actor_id="test-runner")
 
         json_out = os.path.join(self.output_dir, 'toSequence_parsed.json')
         csv_out = os.path.join(self.output_dir, 'toSequence_parsed.csv')
@@ -98,9 +100,13 @@ class TestAtomicity(unittest.TestCase):
         # Force import after mocks
         if 'main' in sys.modules:
             del sys.modules['main']
+
+        # main.py uses __file__ to find its directories. We need to make sure it looks in our test_dir.
         import main
+        main.__file__ = os.path.join(self.test_dir, 'main.py')
 
         # We'll mock run_batch to fail
+        # Note: main.run_batch is the function imported from utils.dna_ui
         with patch('main.run_batch', side_effect=PersistenceError("Failed")):
             with patch('main.clear_input_file') as mock_clear:
                 with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
