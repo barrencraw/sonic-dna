@@ -32,9 +32,10 @@ import sys
 import time
 import threading
 import argparse
+import uuid
 
 # ─── Import the batch parser and the GUI window ───────────────────────────────
-from utils.dna_ui import main as run_batch
+from utils.dna_ui import main as run_batch, log_structured, DNAStatus
 from utils.providers import RngProvider
 from PySide6.QtWidgets import QApplication
 from ui.main_window import MainWindow
@@ -86,21 +87,44 @@ def watch_loop():
 
             # If there’s new non‐empty content that differs from last run, process it:
             if current_content.strip() and current_content != last_content:
-                timestamp = time.strftime('%Y-%m-%d %H:%M:%S')
-                print(f"[{timestamp}] New DNA detected → running parser…")
+                correlation_id = str(uuid.uuid4())
+                log_structured(
+                    step="watcher_trigger",
+                    outcome=DNAStatus.SUCCESS.value,
+                    correlation_id=correlation_id,
+                    actor_id="watcher",
+                    extra={"reason": "new_content_detected"}
+                )
 
                 try:
-                    run_batch()
+                    run_batch(correlation_id=correlation_id, actor_id="watcher")
                     # Only clear the input file if run_batch() succeeds
                     clear_input_file(input_file)
-                    print(f"[{timestamp}] Parsing complete. Cleared toSequence.txt.\n")
+                    log_structured(
+                        step="input_cleanup",
+                        outcome=DNAStatus.SUCCESS.value,
+                        correlation_id=correlation_id,
+                        actor_id="watcher"
+                    )
                 except Exception as e:
                     # Classify errors
                     from utils.dna_ui import DNAProcessingError
                     if isinstance(e, DNAProcessingError):
-                        print(f"[{timestamp}][Watcher][CRITICAL] DNA processing failed: {e}")
+                        log_structured(
+                            step="batch_processing",
+                            outcome=DNAStatus.ERROR.value,
+                            correlation_id=correlation_id,
+                            actor_id="watcher",
+                            extra={"error_type": "DNAProcessingError", "message": str(e)}
+                        )
                     else:
-                        print(f"[{timestamp}][Watcher][ERROR] Unexpected error: {e}")
+                        log_structured(
+                            step="batch_processing",
+                            outcome=DNAStatus.ERROR.value,
+                            correlation_id=correlation_id,
+                            actor_id="watcher",
+                            extra={"error_type": "UnexpectedError", "message": str(e)}
+                        )
                     # In case of error, we DO NOT clear the input file so we can retry or investigate
 
                 # Reset last_content so we’ll catch the next chunk of DNA
@@ -136,16 +160,39 @@ def process_once():
         print(f"[ERROR] Input file not found: {input_file}")
         return
 
-    print("[Once‐Runner] Processing all DNA strings once…")
+    correlation_id = str(uuid.uuid4())
+    log_structured(
+        step="once_runner_start",
+        outcome=DNAStatus.SUCCESS.value,
+        correlation_id=correlation_id,
+        actor_id="cli"
+    )
     try:
-        run_batch()
-        print("[Once‐Runner] Done.")
+        run_batch(correlation_id=correlation_id, actor_id="cli")
+        log_structured(
+            step="once_runner_complete",
+            outcome=DNAStatus.SUCCESS.value,
+            correlation_id=correlation_id,
+            actor_id="cli"
+        )
     except Exception as e:
         from utils.dna_ui import DNAProcessingError
         if isinstance(e, DNAProcessingError):
-            print(f"[Once‐Runner][CRITICAL] DNA processing failed: {e}")
+            log_structured(
+                step="once_runner_fail",
+                outcome=DNAStatus.ERROR.value,
+                correlation_id=correlation_id,
+                actor_id="cli",
+                extra={"error_type": "DNAProcessingError", "message": str(e)}
+            )
         else:
-            print(f"[Once‐Runner][ERROR] Unexpected error: {e}")
+            log_structured(
+                step="once_runner_fail",
+                outcome=DNAStatus.ERROR.value,
+                correlation_id=correlation_id,
+                actor_id="cli",
+                extra={"error_type": "UnexpectedError", "message": str(e)}
+            )
         sys.exit(1)
 
 # ─── MAIN ENTRYPOINT ───────────────────────────────────────────────────────────
@@ -178,6 +225,13 @@ def main():
     # Ensure working directory is project root
     script_dir = os.path.dirname(os.path.abspath(__file__))
     os.chdir(script_dir)
+
+    log_structured(
+        step="gui_launch",
+        outcome=DNAStatus.SUCCESS.value,
+        correlation_id="app-startup",
+        actor_id="system"
+    )
 
     app = QApplication(sys.argv)
 
