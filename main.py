@@ -96,8 +96,10 @@ def watch_loop():
                     print(f"[{timestamp}] Parsing complete. Cleared toSequence.txt.\n")
                 except Exception as e:
                     # Classify errors
-                    from utils.dna_ui import DNAProcessingError
-                    if isinstance(e, DNAProcessingError):
+                    from utils.dna_ui import DNAProcessingError, ThermalOverloadError
+                    if isinstance(e, ThermalOverloadError):
+                        print(f"[{timestamp}][Watcher][REFUSED] {e}")
+                    elif isinstance(e, DNAProcessingError):
                         print(f"[{timestamp}][Watcher][CRITICAL] DNA processing failed: {e}")
                     else:
                         print(f"[{timestamp}][Watcher][ERROR] Unexpected error: {e}")
@@ -141,12 +143,16 @@ def process_once():
         run_batch()
         print("[Once‐Runner] Done.")
     except Exception as e:
-        from utils.dna_ui import DNAProcessingError
-        if isinstance(e, DNAProcessingError):
+        from utils.dna_ui import DNAProcessingError, ThermalOverloadError
+        if isinstance(e, ThermalOverloadError):
+            print(f"[Once‐Runner][REFUSED] {e}")
+            sys.exit(1)
+        elif isinstance(e, DNAProcessingError):
             print(f"[Once‐Runner][CRITICAL] DNA processing failed: {e}")
+            sys.exit(1)
         else:
             print(f"[Once‐Runner][ERROR] Unexpected error: {e}")
-        sys.exit(1)
+            sys.exit(1)
 
 # ─── MAIN ENTRYPOINT ───────────────────────────────────────────────────────────
 
