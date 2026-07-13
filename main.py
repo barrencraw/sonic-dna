@@ -4,9 +4,9 @@ main.py
 
 – If run directly (python main.py), this will launch your PySide6 GUI (ui/main_window.py),
   but also start a background watcher that “watches” data/raw/toSequence.txt. Any time
-  you append new DNA lines to that file, it automatically:
-     • calls dna_ui.main() → which parses all lines and writes JSON/CSV to data/output/
-     • clears toSequence.txt so those lines aren’t re‐parsed
+  you append new DNA sequences to that file, it automatically:
+     • calls dna_ui.main() → which parses all sequences and writes JSON/CSV to data/output/
+     • clears toSequence.txt so those sequences aren’t re‐parsed
 
 – If you want to run only a one‐time batch parse (no GUI), you can launch with
     python main.py --once
@@ -23,7 +23,7 @@ Directory layout (relative to where this main.py lives):
   ├─ rules/                 ← all your rule_*.json files
   └─ data/
       ├─ raw/
-      │   └─ toSequence.txt ← add one DNA string per line here
+      │   └─ toSequence.txt ← add one DNA sequence per line here
       └─ output/            ← results (toSequence_parsed.json + .csv) get written here
 """
 
@@ -32,9 +32,10 @@ import sys
 import time
 import threading
 import argparse
+import uuid
 
 # ─── Import the batch parser and the GUI window ───────────────────────────────
-from utils.dna_ui import main as run_batch
+from utils.dna_ui import run_batch
 from utils.providers import RngProvider
 from PySide6.QtWidgets import QApplication
 from ui.main_window import MainWindow
@@ -79,7 +80,7 @@ def watch_loop():
     input_file = os.path.join(raw_folder, 'toSequence.txt')
     last_content = ""
 
-    print("[Watcher] Started. Monitoring data/raw/toSequence.txt for new DNA lines…")
+    print("[Watcher] Started. Monitoring data/raw/toSequence.txt for new DNA sequences…")
     try:
         while True:
             current_content = read_raw_contents(input_file)
@@ -87,10 +88,11 @@ def watch_loop():
             # If there’s new non‐empty content that differs from last run, process it:
             if current_content.strip() and current_content != last_content:
                 timestamp = time.strftime('%Y-%m-%d %H:%M:%S')
-                print(f"[{timestamp}] New DNA detected → running parser…")
+                correlation_id = str(uuid.uuid4())
+                print(f"[{timestamp}] New DNA sequence detected [CID: {correlation_id}] → running parser…")
 
                 try:
-                    run_batch()
+                    run_batch(correlation_id=correlation_id)
                     # Only clear the input file if run_batch() succeeds
                     clear_input_file(input_file)
                     print(f"[{timestamp}] Parsing complete. Cleared toSequence.txt.\n")
@@ -136,9 +138,10 @@ def process_once():
         print(f"[ERROR] Input file not found: {input_file}")
         return
 
-    print("[Once‐Runner] Processing all DNA strings once…")
+    correlation_id = f"once-{int(time.time())}"
+    print(f"[Once‐Runner] Processing all DNA sequences once [CID: {correlation_id}]…")
     try:
-        run_batch()
+        run_batch(correlation_id=correlation_id)
         print("[Once‐Runner] Done.")
     except Exception as e:
         from utils.dna_ui import DNAProcessingError
