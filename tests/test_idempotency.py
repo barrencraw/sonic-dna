@@ -3,7 +3,7 @@ import json
 import shutil
 import unittest
 import time
-from utils.dna_ui import main as run_batch
+from utils.dna_ui import run_batch
 
 class TestIdempotency(unittest.TestCase):
     def setUp(self):
