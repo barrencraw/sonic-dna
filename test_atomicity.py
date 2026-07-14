@@ -17,7 +17,8 @@ import shutil
 import tempfile
 import json
 from unittest.mock import patch, MagicMock
-from utils.dna_ui import main as run_batch, PersistenceError, DNAProcessingError
+from utils.dna_ui import run_batch, PersistenceError, DNAProcessingError
+import main
 
 class TestAtomicity(unittest.TestCase):
     def setUp(self):
@@ -48,9 +49,12 @@ class TestAtomicity(unittest.TestCase):
             }, f)
 
         self.old_cwd = os.getcwd()
+        self.old_main_file = main.__file__
+        main.__file__ = os.path.join(self.test_dir, 'main.py')
         os.chdir(self.test_dir)
 
     def tearDown(self):
+        main.__file__ = self.old_main_file
         os.chdir(self.old_cwd)
         shutil.rmtree(self.test_dir)
 
@@ -100,11 +104,15 @@ class TestAtomicity(unittest.TestCase):
             del sys.modules['main']
         import main
 
+        # Point main.__file__ to our test dir so process_once finds the file
+        main.__file__ = os.path.join(self.test_dir, 'main.py')
+
         # We'll mock run_batch to fail
         with patch('main.run_batch', side_effect=PersistenceError("Failed")):
             with patch('main.clear_input_file') as mock_clear:
-                with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
+                with patch('main.sys.exit') as mock_exit:
                     main.process_once()
+                    mock_exit.assert_called_with(1)
 
                 mock_clear.assert_not_called()
 
