@@ -88,6 +88,25 @@ class TestIdempotency(unittest.TestCase):
         self.assertIn(dna1, dnas)
         self.assertIn(dna2, dnas)
 
+    def test_ledger_indentation_fix(self):
+        """Verify that multiple items in a single batch all get recorded in the ledger."""
+        dna1 = "VOL00100100101"
+        dna2 = "VOL00200200202"
+        dna3 = "VOL00300300303"
+
+        with open(self.input_file, 'w') as f:
+            f.write(f"{dna1}\n{dna2}\n{dna3}\n")
+
+        run_batch()
+
+        with open(self.ledger_path, 'r') as f:
+            ledger = json.load(f)
+
+        self.assertIn(dna1, ledger, "First DNA should be in ledger")
+        self.assertIn(dna2, ledger, "Second DNA should be in ledger")
+        self.assertIn(dna3, ledger, "Third DNA should be in ledger")
+        self.assertEqual(len(ledger), 3)
+
     def test_retry_after_transient_failure(self):
         # We'll simulate a transient failure by corrupting the output after a successful process
         # and then re-running.
