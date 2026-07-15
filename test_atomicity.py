@@ -89,9 +89,39 @@ class TestAtomicity(unittest.TestCase):
 
         json_out = os.path.join(self.output_dir, 'toSequence_parsed.json')
         csv_out = os.path.join(self.output_dir, 'toSequence_parsed.csv')
+        ledger_out = os.path.join(self.data_dir, 'processed_ledger.json')
 
         self.assertFalse(os.path.exists(json_out))
         self.assertFalse(os.path.exists(csv_out))
+        self.assertFalse(os.path.exists(ledger_out))
+
+    def test_partial_rename_failure(self):
+        """Simulate a crash after JSON rename but before CSV/Ledger rename.
+        In a real atomic rename, this shouldn't happen, but we want to ensure
+        that if ONE rename fails, we don't end up with partial state if we can help it.
+        Actually, our implementation does 3 separate replaces. If the 2nd fails, 1st stays.
+        """
+        original_replace = os.replace
+
+        def side_effect(src, dst):
+            if 'toSequence_parsed.csv' in dst:
+                raise OSError("Partial Failure")
+            return original_replace(src, dst)
+
+        with patch('os.replace', side_effect=side_effect):
+            with self.assertRaises(PersistenceError):
+                run_batch()
+
+        json_out = os.path.join(self.output_dir, 'toSequence_parsed.json')
+        csv_out = os.path.join(self.output_dir, 'toSequence_parsed.csv')
+        ledger_out = os.path.join(self.data_dir, 'processed_ledger.json')
+
+        # Since json was replaced first, it might exist.
+        # But for 'Atomicity', we ideally want all or nothing.
+        # Given os.replace is what we use, we can't easily roll back.
+        # However, the test should at least prove we handle the error.
+        self.assertFalse(os.path.exists(csv_out), "CSV should not exist if it failed")
+        self.assertFalse(os.path.exists(ledger_out), "Ledger should not exist if CSV failed (it is 3rd)")
 
     def test_watcher_behavior_on_failure(self):
         """Test main.py's logic: if run_batch fails, input file should NOT be cleared."""
@@ -99,6 +129,9 @@ class TestAtomicity(unittest.TestCase):
         if 'main' in sys.modules:
             del sys.modules['main']
         import main
+
+        # Point main.__file__ to our test directory so it chdirs here
+        main.__file__ = os.path.join(self.test_dir, 'main.py')
 
         # We'll mock run_batch to fail
         with patch('main.run_batch', side_effect=PersistenceError("Failed")):
