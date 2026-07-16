@@ -34,7 +34,7 @@ import threading
 import argparse
 
 # ─── Import the batch parser and the GUI window ───────────────────────────────
-from utils.dna_ui import main as run_batch
+from utils.dna_ui import run_batch
 from utils.providers import RngProvider
 from PySide6.QtWidgets import QApplication
 from ui.main_window import MainWindow
@@ -134,7 +134,7 @@ def process_once():
     input_file = os.path.join(raw_folder, 'toSequence.txt')
     if not os.path.isfile(input_file):
         print(f"[ERROR] Input file not found: {input_file}")
-        return
+        sys.exit(1)
 
     print("[Once‐Runner] Processing all DNA strings once…")
     try:
