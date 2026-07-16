@@ -10,6 +10,13 @@ sys.modules["PySide6.QtGui"] = mock_pyside6
 sys.modules["torch"] = MagicMock()
 sys.modules["torchaudio"] = MagicMock()
 sys.modules["sounddevice"] = MagicMock()
+sys.modules["numpy"] = MagicMock()
+sys.modules["scipy"] = MagicMock()
+sys.modules["scipy.io"] = MagicMock()
+sys.modules["scipy.io.wavfile"] = MagicMock()
+sys.modules["watchdog"] = MagicMock()
+sys.modules["watchdog.observers"] = MagicMock()
+sys.modules["watchdog.events"] = MagicMock()
 
 import unittest
 import os
@@ -17,7 +24,7 @@ import shutil
 import tempfile
 import json
 from unittest.mock import patch, MagicMock
-from utils.dna_ui import main as run_batch, PersistenceError, DNAProcessingError
+from utils.dna_ui import run_batch, PersistenceError, DNAProcessingError
 
 class TestAtomicity(unittest.TestCase):
     def setUp(self):
@@ -103,8 +110,9 @@ class TestAtomicity(unittest.TestCase):
         # We'll mock run_batch to fail
         with patch('main.run_batch', side_effect=PersistenceError("Failed")):
             with patch('main.clear_input_file') as mock_clear:
-                with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
+                with patch('main.sys.exit') as mock_exit:
                     main.process_once()
+                    mock_exit.assert_called_with(1)
 
                 mock_clear.assert_not_called()
 

@@ -3,7 +3,7 @@ import json
 import shutil
 import unittest
 import time
-from utils.dna_ui import main as run_batch
+from utils.dna_ui import run_batch
 
 class TestIdempotency(unittest.TestCase):
     def setUp(self):
@@ -17,7 +17,7 @@ class TestIdempotency(unittest.TestCase):
         self.json_output = os.path.join(self.output_folder, 'toSequence_parsed.json')
 
         # Backup existing data if any
-        self.backup_folder = os.path.join(self.project_root, 'data_backup')
+        self.backup_folder = os.path.join(self.project_root, 'data_backup_idempotency')
         if os.path.exists(self.data_folder):
             shutil.copytree(self.data_folder, self.backup_folder, dirs_exist_ok=True)
 
@@ -27,18 +27,16 @@ class TestIdempotency(unittest.TestCase):
         os.makedirs(self.raw_folder, exist_ok=True)
         os.makedirs(self.output_folder, exist_ok=True)
 
-        # Initialize empty ledger
+        # Initialize empty ledger structure
         with open(self.ledger_path, 'w') as f:
-            json.dump({}, f)
+            json.dump({'ledger': {}}, f)
 
     def tearDown(self):
         # Restore backup
         if os.path.exists(self.data_folder):
             shutil.rmtree(self.data_folder)
         if os.path.exists(self.backup_folder):
-            # Check if backup exists before moving
-            if os.path.exists(self.backup_folder):
-                shutil.move(self.backup_folder, self.data_folder)
+            shutil.move(self.backup_folder, self.data_folder)
 
     def test_double_invocation_same_key(self):
         # DNA for Volume (prefix 'VOL')
@@ -56,9 +54,10 @@ class TestIdempotency(unittest.TestCase):
         self.assertEqual(data[0]['dna'], dna)
 
         with open(self.ledger_path, 'r') as f:
-            ledger = json.load(f)
+            state = json.load(f)
+        ledger = state.get('ledger', state)
         self.assertIn(dna, ledger)
-        self.assertEqual(ledger[dna]['terminal_outcome'], 'success')
+        self.assertEqual(ledger[dna]['terminal_outcome'], 'SUCCESS')
 
         # 2. Second invocation with same DNA
         with open(self.input_file, 'w') as f:
@@ -89,8 +88,6 @@ class TestIdempotency(unittest.TestCase):
         self.assertIn(dna2, dnas)
 
     def test_retry_after_transient_failure(self):
-        # We'll simulate a transient failure by corrupting the output after a successful process
-        # and then re-running.
         dna = "VOL08900750712"
 
         with open(self.input_file, 'w') as f:
@@ -99,16 +96,10 @@ class TestIdempotency(unittest.TestCase):
         run_batch() # Success
 
         with open(self.ledger_path, 'r') as f:
-            ledger = json.load(f)
+            state = json.load(f)
+        ledger = state.get('ledger', state)
         self.assertIn(dna, ledger)
 
-        # Simulate a crash where the output file was lost but ledger remained (or vice-versa)
-        # If output file is lost, next run should NOT re-process if it's in the ledger.
-        # WAIT: The requirement is "retry after transient failure → eventual consistency without corruption".
-        # If the output file is cumulative and we lose it, but keep the ledger, we might miss the data.
-        # But idempotency usually means "don't do it again if you already did it".
-
-        # Let's test if it handles corrupted output file gracefully.
         with open(self.json_output, 'w') as f:
             f.write("CORRUPTED")
 
