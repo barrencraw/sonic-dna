@@ -3,6 +3,8 @@ import os
 import json
 import csv
 import time
+from enum import Enum
+import datetime
 from utils.dna_calculator import DNACalculator, RuleParseError
 
 def ensure_folder(path):
@@ -50,6 +52,13 @@ class RuleLoadError(DNAProcessingError):
 class PersistenceError(DNAProcessingError):
     """Raised when writing or moving output files fails."""
     pass
+
+class DNAStatus(Enum):
+    SUCCESS = "SUCCESS"
+    ERROR = "ERROR"
+    SKIPPED = "SKIPPED"
+    REFUSED = "REFUSED"
+
 def load_ledger(ledger_path):
     if os.path.exists(ledger_path):
         try:
@@ -63,7 +72,21 @@ def save_ledger(ledger_path, ledger):
     with open(ledger_path, 'w', encoding='utf-8') as f:
         json.dump(ledger, f, indent=2)
 
-def main():
+def log_structured(correlation_id, step, outcome, latency_ms=0, idempotency_key=None, outcome_detail=None):
+    log_entry = {
+        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat() + 'Z',
+        "correlation_id": correlation_id,
+        "actor_id": "dna_batch_processor",
+        "chain_name": "dna_parsing_chain",
+        "step": step,
+        "outcome": outcome,
+        "latency_ms": latency_ms,
+        "idempotency_key": idempotency_key,
+        "outcome_detail": outcome_detail
+    }
+    print(f"JSON_LOG: {json.dumps(log_entry)}")
+
+def run_batch(correlation_id="default"):
     # Determine file paths
     project_root = os.getcwd()
     raw_folder = os.path.join(project_root, 'data', 'raw')
@@ -73,23 +96,25 @@ def main():
 
     input_file = os.path.join(raw_folder, 'toSequence.txt')
     if not os.path.isfile(input_file):
-        print(f"[ERROR] Input file not found: {input_file}")
+        log_structured(correlation_id, "check_input", DNAStatus.ERROR.value, outcome_detail=f"Input file not found: {input_file}")
         return
 
     # Instantiate calculator
     try:
         calculator = DNACalculator(rules_folder=os.path.join(project_root, 'rules'))
     except Exception as e:
+        log_structured(correlation_id, "initialize_calculator", DNAStatus.ERROR.value, outcome_detail=str(e))
         raise RuleLoadError(f"Could not load rules from {os.path.join(project_root, 'rules')}") from e
 
     # Read DNA strings
     try:
         dna_list = read_input_file(input_file)
     except Exception as e:
+        log_structured(correlation_id, "read_input", DNAStatus.ERROR.value, outcome_detail=str(e))
         raise DNAProcessingError(f"Failed to read input file: {input_file}") from e
 
     if not dna_list:
-        print("[WARN] No DNA strings found in toSequence.txt")
+        log_structured(correlation_id, "check_input", DNAStatus.SKIPPED.value, outcome_detail="No DNA strings found")
         return
 
     ledger = load_ledger(ledger_path)
@@ -124,12 +149,11 @@ def main():
 
     new_processed_count = 0
     for dna_str in dna_list:
+        start_time = time.time()
         idempotency_key = dna_str
         if idempotency_key in ledger:
-            print(f"[Idempotency] key={idempotency_key} dedupe_hit=True terminal_outcome={ledger[idempotency_key]['terminal_outcome']}")
+            log_structured(correlation_id, "process_dna", DNAStatus.SKIPPED.value, idempotency_key=idempotency_key, outcome_detail="Dedupe hit")
             continue
-
-        print(f"[Idempotency] key={idempotency_key} dedupe_hit=False terminal_outcome=processing")
 
         try:
             result = calculator.parse(dna_str)
@@ -146,7 +170,8 @@ def main():
             flat['rule'] = result['rule']
             csv_rows.append(flat)
             all_flattened_keys.update(flat.keys())
-            outcome = "success"
+            outcome = DNAStatus.SUCCESS.value
+            outcome_detail = "Successfully parsed"
 
         except RuleParseError as e:
             # On parse error, record as error entry
@@ -158,7 +183,17 @@ def main():
             flat = {'dna': dna_str, 'error': str(e)}
             csv_rows.append(flat)
             all_flattened_keys.update(flat.keys())
-            outcome = f"error: {str(e)}"
+            outcome = DNAStatus.ERROR.value
+            outcome_detail = str(e)
+
+        latency_ms = int((time.time() - start_time) * 1000)
+        ledger[idempotency_key] = {
+            'terminal_outcome': outcome,
+            'outcome_detail': outcome_detail,
+            'timestamp': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
+        }
+        log_structured(correlation_id, "process_dna", outcome, latency_ms=latency_ms, idempotency_key=idempotency_key, outcome_detail=outcome_detail)
+        new_processed_count += 1
 
     # ATOMIC WRITE PATTERN:
     # 1. Write to a temporary directory in the same filesystem as the output folder
@@ -198,13 +233,6 @@ def main():
         except Exception as e:
             raise PersistenceError("Failed to write output files atomically") from e
 
-    print(f"[OK] Parsed {len(dna_list)} DNA strings.")
-        ledger[idempotency_key] = {
-            'terminal_outcome': outcome,
-            'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
-        }
-        print(f"[Idempotency] key={idempotency_key} dedupe_hit=False terminal_outcome={outcome}")
-        new_processed_count += 1
 
     if new_processed_count > 0:
         # Save ledger
@@ -224,9 +252,7 @@ def main():
                 out = {k: row.get(k, '') for k in fieldnames}
                 writer.writerow(out)
 
-    print(f"[OK] Processed {new_processed_count} new DNA strings. Total in ledger: {len(ledger)}")
-    print(f"     JSON → {json_output_path}")
-    print(f"     CSV  → {csv_output_path}")
+    log_structured(correlation_id, "batch_complete", DNAStatus.SUCCESS.value, outcome_detail=f"Processed {new_processed_count} new. Total: {len(ledger)}")
 
 if __name__ == '__main__':
-    main()
+    run_batch()

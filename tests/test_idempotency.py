@@ -3,7 +3,7 @@ import json
 import shutil
 import unittest
 import time
-from utils.dna_ui import main as run_batch
+from utils.dna_ui import run_batch
 
 class TestIdempotency(unittest.TestCase):
     def setUp(self):
@@ -58,7 +58,7 @@ class TestIdempotency(unittest.TestCase):
         with open(self.ledger_path, 'r') as f:
             ledger = json.load(f)
         self.assertIn(dna, ledger)
-        self.assertEqual(ledger[dna]['terminal_outcome'], 'success')
+        self.assertEqual(ledger[dna]['terminal_outcome'], 'SUCCESS')
 
         # 2. Second invocation with same DNA
         with open(self.input_file, 'w') as f:
