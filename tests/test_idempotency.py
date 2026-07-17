@@ -3,7 +3,7 @@ import json
 import shutil
 import unittest
 import time
-from utils.dna_ui import main as run_batch
+from utils.dna_ui import run_batch
 
 class TestIdempotency(unittest.TestCase):
     def setUp(self):
@@ -56,7 +56,8 @@ class TestIdempotency(unittest.TestCase):
         self.assertEqual(data[0]['dna'], dna)
 
         with open(self.ledger_path, 'r') as f:
-            ledger = json.load(f)
+            state = json.load(f)
+        ledger = state.get('ledger', state)
         self.assertIn(dna, ledger)
         self.assertEqual(ledger[dna]['terminal_outcome'], 'success')
 
@@ -99,7 +100,8 @@ class TestIdempotency(unittest.TestCase):
         run_batch() # Success
 
         with open(self.ledger_path, 'r') as f:
-            ledger = json.load(f)
+            state = json.load(f)
+        ledger = state.get('ledger', state)
         self.assertIn(dna, ledger)
 
         # Simulate a crash where the output file was lost but ledger remained (or vice-versa)
