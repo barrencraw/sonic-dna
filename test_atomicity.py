@@ -17,7 +17,7 @@ import shutil
 import tempfile
 import json
 from unittest.mock import patch, MagicMock
-from utils.dna_ui import main as run_batch, PersistenceError, DNAProcessingError
+from utils.dna_ui import run_batch, PersistenceError, DNAProcessingError
 
 class TestAtomicity(unittest.TestCase):
     def setUp(self):
@@ -99,6 +99,9 @@ class TestAtomicity(unittest.TestCase):
         if 'main' in sys.modules:
             del sys.modules['main']
         import main
+
+        # Patch main.__file__ to point to the sandbox location
+        main.__file__ = os.path.join(self.test_dir, 'main.py')
 
         # We'll mock run_batch to fail
         with patch('main.run_batch', side_effect=PersistenceError("Failed")):
