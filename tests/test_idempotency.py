@@ -126,5 +126,52 @@ class TestIdempotency(unittest.TestCase):
         self.assertEqual(len(data), 1)
         self.assertEqual(data[0]['dna'], new_dna)
 
+    def test_structured_telemetry_logs(self):
+        # Patch standard print to capture the output logs
+        from io import StringIO
+        import sys
+
+        dna = "VOL08900750712"
+        with open(self.input_file, 'w') as f:
+            f.write(dna + "\n")
+
+        saved_stdout = sys.stdout
+        sys.stdout = out = StringIO()
+        try:
+            run_batch(correlation_id="test-corr-id-12345")
+        finally:
+            sys.stdout = saved_stdout
+
+        output = out.getvalue()
+        log_lines = [line for line in output.split('\n') if line.startswith("JSON_LOG:")]
+        self.assertTrue(len(log_lines) >= 3, "Should log at least start_batch, process_sequence, and end_batch")
+
+        # Parse and check fields of the logs
+        logs = []
+        for line in log_lines:
+            json_part = line.replace("JSON_LOG:", "").strip()
+            logs.append(json.loads(json_part))
+
+        # Check start_batch
+        start_log = logs[0]
+        self.assertEqual(start_log['step'], "start_batch")
+        self.assertEqual(start_log['correlation_id'], "test-corr-id-12345")
+        self.assertEqual(start_log['chain_name'], "dna_batch_parsing")
+        self.assertEqual(start_log['outcome'], "success")
+        self.assertIn("timestamp", start_log)
+
+        # Check process_sequence
+        proc_log = logs[1]
+        self.assertEqual(proc_log['step'], "process_sequence")
+        self.assertEqual(proc_log['correlation_id'], "test-corr-id-12345")
+        self.assertEqual(proc_log['idempotency_key'], dna)
+        self.assertEqual(proc_log['outcome'], "success")
+
+        # Check end_batch
+        end_log = logs[-1]
+        self.assertEqual(end_log['step'], "end_batch")
+        self.assertEqual(end_log['correlation_id'], "test-corr-id-12345")
+        self.assertEqual(end_log['outcome'], "success")
+
 if __name__ == '__main__':
     unittest.main()
