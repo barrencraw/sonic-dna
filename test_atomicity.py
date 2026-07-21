@@ -99,6 +99,7 @@ class TestAtomicity(unittest.TestCase):
         if 'main' in sys.modules:
             del sys.modules['main']
         import main
+        main.__file__ = os.path.join(self.test_dir, 'main.py')
 
         # We'll mock run_batch to fail
         with patch('main.run_batch', side_effect=PersistenceError("Failed")):
@@ -111,6 +112,27 @@ class TestAtomicity(unittest.TestCase):
         # Verify file still has content
         with open(self.input_file, 'r') as f:
             self.assertEqual(f.read().strip(), "V100")
+
+    def test_crash_during_ledger_save(self):
+        """Simulate a crash during ledger save. The existing ledger file should remain intact."""
+        from utils.dna_ui import save_ledger
+
+        ledger_file = os.path.join(self.data_dir, 'processed_ledger.json')
+        initial_data = {"existing_key": "some_value"}
+
+        # Save initial valid state
+        save_ledger(ledger_file, initial_data)
+        self.assertTrue(os.path.exists(ledger_file))
+
+        # Now mock json.dump to simulate disk full/write failure
+        with patch('json.dump', side_effect=IOError("Disk Full")):
+            with self.assertRaises(PersistenceError):
+                save_ledger(ledger_file, {"new_key": "new_value"})
+
+        # Assert the original ledger file is still intact with its original content
+        with open(ledger_file, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+            self.assertEqual(data, initial_data)
 
 if __name__ == '__main__':
     unittest.main()
