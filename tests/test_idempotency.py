@@ -1,5 +1,6 @@
 import os
 import json
+import csv
 import shutil
 import unittest
 import time
@@ -125,6 +126,41 @@ class TestIdempotency(unittest.TestCase):
         # Only VOL00000000000 is in the new output.
         self.assertEqual(len(data), 1)
         self.assertEqual(data[0]['dna'], new_dna)
+
+    def test_batch_individual_idempotency(self):
+        """Processes a batch of multiple DNA strings, verifying that each item is correctly recorded individually in the ledger, JSON, and CSV outputs."""
+        dna1 = "VOL08900750712"
+        dna2 = "VOL00000000000"
+
+        with open(self.input_file, 'w') as f:
+            f.write(f"{dna1}\n{dna2}\n")
+
+        run_batch()
+
+        # Check ledger
+        with open(self.ledger_path, 'r') as f:
+            ledger = json.load(f)
+        self.assertIn(dna1, ledger)
+        self.assertIn(dna2, ledger)
+        self.assertEqual(ledger[dna1]['terminal_outcome'], 'success')
+        self.assertEqual(ledger[dna2]['terminal_outcome'], 'success')
+
+        # Check JSON output
+        with open(self.json_output, 'r') as f:
+            data = json.load(f)
+        self.assertEqual(len(data), 2)
+        dnas = [entry['dna'] for entry in data]
+        self.assertIn(dna1, dnas)
+        self.assertIn(dna2, dnas)
+
+        # Check CSV output
+        csv_output = os.path.join(self.output_folder, 'toSequence_parsed.csv')
+        with open(csv_output, 'r') as f:
+            reader = csv.DictReader(f)
+            csv_dnas = [row['dna'] for row in reader]
+        self.assertEqual(len(csv_dnas), 2)
+        self.assertIn(dna1, csv_dnas)
+        self.assertIn(dna2, csv_dnas)
 
 if __name__ == '__main__':
     unittest.main()
