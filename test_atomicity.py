@@ -16,7 +16,7 @@ import os
 import shutil
 import tempfile
 import json
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 from utils.dna_ui import main as run_batch, PersistenceError, DNAProcessingError
 
 class TestAtomicity(unittest.TestCase):
@@ -93,6 +93,30 @@ class TestAtomicity(unittest.TestCase):
         self.assertFalse(os.path.exists(json_out))
         self.assertFalse(os.path.exists(csv_out))
 
+    def test_crash_during_ledger_save(self):
+        """Simulate a crash during ledger saving. The original ledger must remain intact/uncorrupted."""
+        # First, run normally to create a valid ledger
+        run_batch()
+        ledger_path = os.path.join(self.data_dir, 'processed_ledger.json')
+        self.assertTrue(os.path.exists(ledger_path))
+        with open(ledger_path, 'r') as f:
+            original_data = json.load(f)
+
+        # Append new input
+        with open(self.input_file, 'w') as f:
+            f.write("VOL00000000000\n")
+
+        # Now mock save_ledger to raise an exception
+        with patch('utils.dna_ui.save_ledger', side_effect=PersistenceError("Failed to save ledger")):
+            with self.assertRaises(PersistenceError):
+                run_batch()
+
+        # Check that pre-existing ledger file is still valid and unchanged
+        self.assertTrue(os.path.exists(ledger_path))
+        with open(ledger_path, 'r') as f:
+            current_data = json.load(f)
+            self.assertEqual(current_data, original_data)
+
     def test_watcher_behavior_on_failure(self):
         """Test main.py's logic: if run_batch fails, input file should NOT be cleared."""
         # Force import after mocks
@@ -100,13 +124,16 @@ class TestAtomicity(unittest.TestCase):
             del sys.modules['main']
         import main
 
-        # We'll mock run_batch to fail
-        with patch('main.run_batch', side_effect=PersistenceError("Failed")):
-            with patch('main.clear_input_file') as mock_clear:
-                with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
-                    main.process_once()
+        # Patch main.__file__ to point to the sandbox location
+        main_file_mock = os.path.join(self.test_dir, 'main.py')
+        with patch.object(main, '__file__', main_file_mock):
+            # We'll mock run_batch to fail
+            with patch('main.run_batch', side_effect=PersistenceError("Failed")):
+                with patch('main.clear_input_file') as mock_clear:
+                    with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
+                        main.process_once()
 
-                mock_clear.assert_not_called()
+                    mock_clear.assert_not_called()
 
         # Verify file still has content
         with open(self.input_file, 'r') as f:
