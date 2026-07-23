@@ -30,11 +30,12 @@ Directory layout (relative to where this main.py lives):
 import os
 import sys
 import time
+import uuid
 import threading
 import argparse
 
 # ─── Import the batch parser and the GUI window ───────────────────────────────
-from utils.dna_ui import main as run_batch
+from utils.dna_ui import run_batch, DNAProcessingError, ThermalOverloadError
 from utils.providers import RngProvider
 from PySide6.QtWidgets import QApplication
 from ui.main_window import MainWindow
@@ -89,15 +90,16 @@ def watch_loop():
                 timestamp = time.strftime('%Y-%m-%d %H:%M:%S')
                 print(f"[{timestamp}] New DNA detected → running parser…")
 
+                correlation_id = str(uuid.uuid4())
                 try:
-                    run_batch()
+                    run_batch(correlation_id=correlation_id)
                     # Only clear the input file if run_batch() succeeds
                     clear_input_file(input_file)
                     print(f"[{timestamp}] Parsing complete. Cleared toSequence.txt.\n")
                 except Exception as e:
-                    # Classify errors
-                    from utils.dna_ui import DNAProcessingError
-                    if isinstance(e, DNAProcessingError):
+                    if isinstance(e, ThermalOverloadError):
+                        print(f"[{timestamp}][Watcher][REFUSED] {e}")
+                    elif isinstance(e, DNAProcessingError):
                         print(f"[{timestamp}][Watcher][CRITICAL] DNA processing failed: {e}")
                     else:
                         print(f"[{timestamp}][Watcher][ERROR] Unexpected error: {e}")
@@ -137,12 +139,14 @@ def process_once():
         return
 
     print("[Once‐Runner] Processing all DNA strings once…")
+    correlation_id = str(uuid.uuid4())
     try:
-        run_batch()
+        run_batch(correlation_id=correlation_id)
         print("[Once‐Runner] Done.")
     except Exception as e:
-        from utils.dna_ui import DNAProcessingError
-        if isinstance(e, DNAProcessingError):
+        if isinstance(e, ThermalOverloadError):
+            print(f"[Once‐Runner][REFUSED] {e}")
+        elif isinstance(e, DNAProcessingError):
             print(f"[Once‐Runner][CRITICAL] DNA processing failed: {e}")
         else:
             print(f"[Once‐Runner][ERROR] Unexpected error: {e}")
