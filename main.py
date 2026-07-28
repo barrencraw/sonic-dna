@@ -102,6 +102,7 @@ def watch_loop():
                     else:
                         print(f"[{timestamp}][Watcher][ERROR] Unexpected error: {e}")
                     # In case of error, we DO NOT clear the input file so we can retry or investigate
+                    sys.exit(1)
 
                 # Reset last_content so we’ll catch the next chunk of DNA
                 last_content = ""
