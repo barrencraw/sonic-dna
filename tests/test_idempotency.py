@@ -126,5 +126,41 @@ class TestIdempotency(unittest.TestCase):
         self.assertEqual(len(data), 1)
         self.assertEqual(data[0]['dna'], new_dna)
 
+    def test_no_write_if_zero_new_processed(self):
+        """If there are no new sequences to process, output files should not be touched."""
+        dna = "VOL08900750712"
+        # Pre-populate ledger
+        with open(self.ledger_path, 'w') as f:
+            json.dump({
+                dna: {
+                    'terminal_outcome': 'success',
+                    'timestamp': '2025-01-01 00:00:00'
+                }
+            }, f)
+
+        # Place the same dna in input
+        with open(self.input_file, 'w') as f:
+            f.write(dna + "\n")
+
+        # Mock the tempfile.TemporaryDirectory to see if it's called
+        from unittest.mock import patch
+        with patch('tempfile.TemporaryDirectory') as mock_tempdir:
+            run_batch()
+            mock_tempdir.assert_not_called()
+
+    def test_ledger_save_failure_raises_ledger_save_error(self):
+        """If saving the ledger fails, raise LedgerSaveError."""
+        from utils.dna_ui import LedgerSaveError
+        dna = "VOL08900750712"
+        with open(self.input_file, 'w') as f:
+            f.write(dna + "\n")
+
+        # Mock json.dump during save_ledger to fail
+        from unittest.mock import patch
+        # Patch json.dump to raise an error
+        with patch('json.dump', side_effect=IOError("Disk full")):
+            with self.assertRaises(LedgerSaveError):
+                run_batch()
+
 if __name__ == '__main__':
     unittest.main()
