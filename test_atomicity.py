@@ -16,7 +16,7 @@ import os
 import shutil
 import tempfile
 import json
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 from utils.dna_ui import main as run_batch, PersistenceError, DNAProcessingError
 
 class TestAtomicity(unittest.TestCase):
@@ -67,7 +67,7 @@ class TestAtomicity(unittest.TestCase):
         with open(json_out, 'r') as f:
             data = json.load(f)
             self.assertEqual(len(data), 1)
-            self.assertEqual(data[0]['dna'], 'V100')
+            self.assertEqual(data[0]['dna_sequence'], 'V100')
 
     def test_crash_during_json_write(self):
         """Simulate a crash during JSON writing. No output files should be created."""
@@ -100,13 +100,15 @@ class TestAtomicity(unittest.TestCase):
             del sys.modules['main']
         import main
 
-        # We'll mock run_batch to fail
-        with patch('main.run_batch', side_effect=PersistenceError("Failed")):
-            with patch('main.clear_input_file') as mock_clear:
-                with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
-                    main.process_once()
-
-                mock_clear.assert_not_called()
+        main_sandbox_file = os.path.join(self.test_dir, 'main.py')
+        with patch.object(main, '__file__', main_sandbox_file):
+            # We'll mock run_batch to fail
+            with patch('main.run_batch', side_effect=PersistenceError("Failed")):
+                with patch('main.clear_input_file') as mock_clear:
+                    with patch('main.sys.exit') as mock_exit:
+                        main.process_once()
+                        mock_exit.assert_called_once_with(1)
+                    mock_clear.assert_not_called()
 
         # Verify file still has content
         with open(self.input_file, 'r') as f:
