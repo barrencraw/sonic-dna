@@ -34,7 +34,7 @@ import threading
 import argparse
 
 # ─── Import the batch parser and the GUI window ───────────────────────────────
-from utils.dna_ui import main as run_batch
+from utils.dna_ui import main as run_batch, DNAProcessingError, ThermalOverloadError, CoreExhaustionError
 from utils.providers import RngProvider
 from PySide6.QtWidgets import QApplication
 from ui.main_window import MainWindow
@@ -94,13 +94,14 @@ def watch_loop():
                     # Only clear the input file if run_batch() succeeds
                     clear_input_file(input_file)
                     print(f"[{timestamp}] Parsing complete. Cleared toSequence.txt.\n")
+                except ThermalOverloadError as e:
+                    print(f"[{timestamp}][Watcher][CRITICAL] Lockout applied: {e}")
+                except CoreExhaustionError as e:
+                    print(f"[{timestamp}][Watcher][CRITICAL] Core exhausted: {e}")
+                except DNAProcessingError as e:
+                    print(f"[{timestamp}][Watcher][CRITICAL] DNA processing failed: {e}")
                 except Exception as e:
-                    # Classify errors
-                    from utils.dna_ui import DNAProcessingError
-                    if isinstance(e, DNAProcessingError):
-                        print(f"[{timestamp}][Watcher][CRITICAL] DNA processing failed: {e}")
-                    else:
-                        print(f"[{timestamp}][Watcher][ERROR] Unexpected error: {e}")
+                    print(f"[{timestamp}][Watcher][ERROR] Unexpected error: {e}")
                     # In case of error, we DO NOT clear the input file so we can retry or investigate
 
                 # Reset last_content so we’ll catch the next chunk of DNA
@@ -140,12 +141,17 @@ def process_once():
     try:
         run_batch()
         print("[Once‐Runner] Done.")
+    except ThermalOverloadError as e:
+        print(f"[Once‐Runner][CRITICAL] Lockout applied: {e}")
+        sys.exit(1)
+    except CoreExhaustionError as e:
+        print(f"[Once‐Runner][CRITICAL] Core exhausted: {e}")
+        sys.exit(1)
+    except DNAProcessingError as e:
+        print(f"[Once‐Runner][CRITICAL] DNA processing failed: {e}")
+        sys.exit(1)
     except Exception as e:
-        from utils.dna_ui import DNAProcessingError
-        if isinstance(e, DNAProcessingError):
-            print(f"[Once‐Runner][CRITICAL] DNA processing failed: {e}")
-        else:
-            print(f"[Once‐Runner][ERROR] Unexpected error: {e}")
+        print(f"[Once‐Runner][ERROR] Unexpected error: {e}")
         sys.exit(1)
 
 # ─── MAIN ENTRYPOINT ───────────────────────────────────────────────────────────
