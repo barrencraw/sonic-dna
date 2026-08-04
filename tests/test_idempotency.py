@@ -126,5 +126,26 @@ class TestIdempotency(unittest.TestCase):
         self.assertEqual(len(data), 1)
         self.assertEqual(data[0]['dna'], new_dna)
 
+    def test_no_atomic_write_on_deduplication(self):
+        # DNA for Volume (prefix 'VOL')
+        dna = "VOL08900750712"
+
+        # 1. First invocation (processes the new DNA string)
+        with open(self.input_file, 'w') as f:
+            f.write(dna + "\n")
+
+        run_batch()
+
+        # 2. Second invocation with same DNA
+        with open(self.input_file, 'w') as f:
+            f.write(dna + "\n")
+
+        from unittest.mock import patch
+        # Patch tempfile.TemporaryDirectory to see if it is called when processing the batch
+        with patch('tempfile.TemporaryDirectory') as mock_temp_dir:
+            run_batch()
+            # Since new_processed_count is 0, TemporaryDirectory should NOT be entered for atomic writes
+            mock_temp_dir.assert_not_called()
+
 if __name__ == '__main__':
     unittest.main()
