@@ -67,7 +67,7 @@ class TestAtomicity(unittest.TestCase):
         with open(json_out, 'r') as f:
             data = json.load(f)
             self.assertEqual(len(data), 1)
-            self.assertEqual(data[0]['dna'], 'V100')
+            self.assertEqual(data[0]['dna_sequence'], 'V100')
 
     def test_crash_during_json_write(self):
         """Simulate a crash during JSON writing. No output files should be created."""
@@ -93,12 +93,42 @@ class TestAtomicity(unittest.TestCase):
         self.assertFalse(os.path.exists(json_out))
         self.assertFalse(os.path.exists(csv_out))
 
+    def test_crash_during_ledger_save(self):
+        """Test that a crash/failure during ledger saving keeps pre-existing files uncorrupted."""
+        # Create a pre-existing ledger file
+        ledger_path = os.path.join(self.data_dir, 'processed_ledger.json')
+        pre_existing_data = {"existing_seq": {"terminal_outcome": "success", "timestamp": "2025-06-01 12:00:00"}}
+        with open(ledger_path, 'w', encoding='utf-8') as f:
+            json.dump(pre_existing_data, f, indent=2)
+
+        # Mock json.dump to raise an IOError when writing to .ledger_tmp
+        original_dump = json.dump
+        def failing_dump(obj, fp, *args, **kwargs):
+            # If writing to a temp ledger file, raise IOError
+            if hasattr(fp, 'name') and '.ledger_tmp' in os.path.basename(fp.name):
+                raise IOError("Disk Full")
+            return original_dump(obj, fp, *args, **kwargs)
+
+        with patch('json.dump', side_effect=failing_dump):
+            from utils.dna_ui import LedgerSaveError
+            with self.assertRaises(LedgerSaveError):
+                run_batch()
+
+        # Pre-existing ledger should still be perfectly intact and not corrupted or empty
+        self.assertTrue(os.path.exists(ledger_path))
+        with open(ledger_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+            self.assertEqual(data, pre_existing_data)
+
     def test_watcher_behavior_on_failure(self):
         """Test main.py's logic: if run_batch fails, input file should NOT be cleared."""
         # Force import after mocks
         if 'main' in sys.modules:
             del sys.modules['main']
         import main
+
+        # Patch main.__file__ to self.test_dir to redirect os.chdir
+        main.__file__ = os.path.join(self.test_dir, 'main.py')
 
         # We'll mock run_batch to fail
         with patch('main.run_batch', side_effect=PersistenceError("Failed")):
