@@ -100,6 +100,9 @@ class TestAtomicity(unittest.TestCase):
             del sys.modules['main']
         import main
 
+        # Patch main.__file__ to point to the sandbox location
+        main.__file__ = os.path.join(self.test_dir, 'main.py')
+
         # We'll mock run_batch to fail
         with patch('main.run_batch', side_effect=PersistenceError("Failed")):
             with patch('main.clear_input_file') as mock_clear:
