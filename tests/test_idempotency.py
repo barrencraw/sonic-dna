@@ -3,6 +3,7 @@ import json
 import shutil
 import unittest
 import time
+from unittest.mock import patch
 from utils.dna_ui import main as run_batch
 
 class TestIdempotency(unittest.TestCase):
@@ -125,6 +126,28 @@ class TestIdempotency(unittest.TestCase):
         # Only VOL00000000000 is in the new output.
         self.assertEqual(len(data), 1)
         self.assertEqual(data[0]['dna'], new_dna)
+
+    def test_no_writes_on_no_new_sequences(self):
+        """Assert that output files are not written when no new DNA sequences are processed."""
+        dna = "VOL08900750712"
+
+        # 1. First run to process the sequence
+        with open(self.input_file, 'w') as f:
+            f.write(dna + "\n")
+        run_batch()
+
+        # Check files exist
+        self.assertTrue(os.path.exists(self.json_output))
+
+        # 2. Mock os.replace to see if it gets called
+        with patch('os.replace') as mock_replace:
+            # Run again with same input (which is already in the ledger)
+            with open(self.input_file, 'w') as f:
+                f.write(dna + "\n")
+            run_batch()
+
+            # Since no new sequences were processed, os.replace should NOT be called to write output files!
+            mock_replace.assert_not_called()
 
 if __name__ == '__main__':
     unittest.main()
