@@ -50,6 +50,11 @@ class RuleLoadError(DNAProcessingError):
 class PersistenceError(DNAProcessingError):
     """Raised when writing or moving output files fails."""
     pass
+
+class AcousticSaturationError(DNAProcessingError):
+    """Raised when system volatility threshold has been reached or exceeded."""
+    pass
+
 def load_ledger(ledger_path):
     if os.path.exists(ledger_path):
         try:
@@ -94,6 +99,21 @@ def main():
 
     ledger = load_ledger(ledger_path)
 
+    # Load Acoustic Saturation/System Volatility metadata
+    metadata = ledger.get('__metadata__', {})
+    system_volatility = float(metadata.get('system_volatility', 0.0))
+    last_transaction_time = float(metadata.get('last_transaction_time', 0.0))
+
+    # Real-time Volatility Decay (Dissipation)
+    current_time = time.time()
+    if last_transaction_time > 0.0:
+        elapsed_seconds = current_time - last_transaction_time
+        if elapsed_seconds > 0:
+            decay = elapsed_seconds * 0.2
+            system_volatility = max(0.0, system_volatility - decay)
+
+    print(f"[Acoustic Saturation] Volatility loaded and decayed. Current Volatility: {system_volatility:.2f}")
+
     # 1) Load existing JSON output
     json_output_path = os.path.join(output_folder, 'toSequence_parsed.json')
     parsed_json = []
@@ -123,6 +143,8 @@ def main():
     from utils.dna_calculator import RuleParseError
 
     new_processed_count = 0
+    error_to_raise = None
+
     for dna_str in dna_list:
         idempotency_key = dna_str
         if idempotency_key in ledger:
@@ -131,8 +153,35 @@ def main():
 
         print(f"[Idempotency] key={idempotency_key} dedupe_hit=False terminal_outcome=processing")
 
+        if dna_str == 'STABILIZE':
+            print(f"[Acoustic Saturation] Executing STABILIZE. Volatility reduced from {system_volatility:.2f} to {max(0.0, system_volatility - 4.0):.2f}")
+            system_volatility = max(0.0, system_volatility - 4.0)
+            outcome = "skipped"
+
+            ledger[idempotency_key] = {
+                'terminal_outcome': outcome,
+                'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
+            }
+            new_processed_count += 1
+            continue
+
+        # Check safety lockout threshold before parsing any DNA sequence
+        if system_volatility >= 10.0:
+            print(f"[Acoustic Saturation Lockout] Volatility threshold reached: {system_volatility:.2f}")
+            error_to_raise = AcousticSaturationError(
+                "Acoustic Saturation Lockout. Volatility threshold exceeded. "
+                "Wait for dissipation or run STABILIZE. The system is indifferent to your deadlines."
+            )
+            break
+
+        is_hf = False
+        actual_dna = dna_str
+        if dna_str.endswith('_HF'):
+            is_hf = True
+            actual_dna = dna_str[:-3]
+
         try:
-            result = calculator.parse(dna_str)
+            result = calculator.parse(actual_dna)
             entry = {
                 'dna': dna_str,
                 'rule': result['rule'],
@@ -148,6 +197,10 @@ def main():
             all_flattened_keys.update(flat.keys())
             outcome = "success"
 
+            vol_increase = 3.0 if is_hf else 1.0
+            print(f"[Acoustic Saturation Accumulation] Volatility increased by {vol_increase}. Old: {system_volatility:.2f}, New: {system_volatility + vol_increase:.2f}")
+            system_volatility += vol_increase
+
         except RuleParseError as e:
             # On parse error, record as error entry
             parsed_json.append({
@@ -159,46 +212,9 @@ def main():
             csv_rows.append(flat)
             all_flattened_keys.update(flat.keys())
             outcome = f"error: {str(e)}"
+            # Vol parse error also adds standard volatility as the parser attempts to parse it
+            system_volatility += 1.0
 
-    # ATOMIC WRITE PATTERN:
-    # 1. Write to a temporary directory in the same filesystem as the output folder
-    # 2. Flush and sync files to ensure they are on disk
-    # 3. Rename them to their final destination (atomic on most OSes)
-
-    json_output_path = os.path.join(output_folder, 'toSequence_parsed.json')
-    csv_output_path = os.path.join(output_folder, 'toSequence_parsed.csv')
-
-    with tempfile.TemporaryDirectory(dir=output_folder) as tmp_dir:
-        tmp_json = os.path.join(tmp_dir, 'output.json')
-        tmp_csv = os.path.join(tmp_dir, 'output.csv')
-
-        try:
-            # 1) Write JSON output to temp
-            with open(tmp_json, 'w', encoding='utf-8') as jf:
-                json.dump(parsed_json, jf, indent=2)
-                jf.flush()
-                os.fsync(jf.fileno())
-
-            # 2) Write CSV output to temp
-            fieldnames = sorted(all_flattened_keys)
-            with open(tmp_csv, 'w', newline='', encoding='utf-8') as cf:
-                writer = csv.DictWriter(cf, fieldnames=fieldnames)
-                writer.writeheader()
-                for row in csv_rows:
-                    out = {k: row.get(k, '') for k in fieldnames}
-                    writer.writerow(out)
-                cf.flush()
-                os.fsync(cf.fileno())
-
-            # 3) Atomic rename (commit)
-            # On Unix, os.replace is atomic. On Windows, it replaces if it exists.
-            os.replace(tmp_json, json_output_path)
-            os.replace(tmp_csv, csv_output_path)
-
-        except Exception as e:
-            raise PersistenceError("Failed to write output files atomically") from e
-
-    print(f"[OK] Parsed {len(dna_list)} DNA strings.")
         ledger[idempotency_key] = {
             'terminal_outcome': outcome,
             'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
@@ -207,24 +223,58 @@ def main():
         new_processed_count += 1
 
     if new_processed_count > 0:
+        # Update metadata in ledger before saving
+        ledger['__metadata__'] = {
+            'system_volatility': system_volatility,
+            'last_transaction_time': current_time
+        }
+        # ATOMIC WRITE PATTERN:
+        # 1. Write to a temporary directory in the same filesystem as the output folder
+        # 2. Flush and sync files to ensure they are on disk
+        # 3. Rename them to their final destination (atomic on most OSes)
+
+        json_output_path = os.path.join(output_folder, 'toSequence_parsed.json')
+        csv_output_path = os.path.join(output_folder, 'toSequence_parsed.csv')
+
+        with tempfile.TemporaryDirectory(dir=output_folder) as tmp_dir:
+            tmp_json = os.path.join(tmp_dir, 'output.json')
+            tmp_csv = os.path.join(tmp_dir, 'output.csv')
+
+            try:
+                # 1) Write JSON output to temp
+                with open(tmp_json, 'w', encoding='utf-8') as jf:
+                    json.dump(parsed_json, jf, indent=2)
+                    jf.flush()
+                    os.fsync(jf.fileno())
+
+                # 2) Write CSV output to temp
+                fieldnames = sorted(all_flattened_keys)
+                with open(tmp_csv, 'w', newline='', encoding='utf-8') as cf:
+                    writer = csv.DictWriter(cf, fieldnames=fieldnames)
+                    writer.writeheader()
+                    for row in csv_rows:
+                        out = {k: row.get(k, '') for k in fieldnames}
+                        writer.writerow(out)
+                    cf.flush()
+                    os.fsync(cf.fileno())
+
+                # 3) Atomic rename (commit)
+                # On Unix, os.replace is atomic. On Windows, it replaces if it exists.
+                os.replace(tmp_json, json_output_path)
+                os.replace(tmp_csv, csv_output_path)
+
+            except Exception as e:
+                raise PersistenceError("Failed to write output files atomically") from e
+
         # Save ledger
         save_ledger(ledger_path, ledger)
 
-        # Write JSON output
-        with open(json_output_path, 'w', encoding='utf-8') as jf:
-            json.dump(parsed_json, jf, indent=2)
-
-        # Write CSV output
-        fieldnames = sorted(all_flattened_keys)
-        with open(csv_output_path, 'w', newline='', encoding='utf-8') as cf:
-            writer = csv.DictWriter(cf, fieldnames=fieldnames)
-            writer.writeheader()
-            for row in csv_rows:
-                # Ensure every field in fieldnames
-                out = {k: row.get(k, '') for k in fieldnames}
-                writer.writerow(out)
+    if error_to_raise is not None:
+        raise error_to_raise
 
     print(f"[OK] Processed {new_processed_count} new DNA strings. Total in ledger: {len(ledger)}")
+    json_output_path = os.path.join(output_folder, 'toSequence_parsed.json')
+    csv_output_path = os.path.join(output_folder, 'toSequence_parsed.csv')
     print(f"     JSON → {json_output_path}")
     print(f"     CSV  → {csv_output_path}")
 
