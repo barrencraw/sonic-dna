@@ -5,6 +5,7 @@ venv/
 env/
 *.pyc
 __pycache__/
+*.egg-info/
 
 
 # Data/model files
