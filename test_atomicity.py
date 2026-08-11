@@ -100,17 +100,64 @@ class TestAtomicity(unittest.TestCase):
             del sys.modules['main']
         import main
 
-        # We'll mock run_batch to fail
-        with patch('main.run_batch', side_effect=PersistenceError("Failed")):
-            with patch('main.clear_input_file') as mock_clear:
-                with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
-                    main.process_once()
+        sandbox_main_file = os.path.join(self.test_dir, 'main.py')
+        with patch.object(main, '__file__', sandbox_main_file):
+            # We'll mock run_batch to fail
+            with patch('main.run_batch', side_effect=PersistenceError("Failed")):
+                with patch('main.clear_input_file') as mock_clear:
+                    with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
+                        main.process_once()
 
-                mock_clear.assert_not_called()
+                    mock_clear.assert_not_called()
 
         # Verify file still has content
         with open(self.input_file, 'r') as f:
             self.assertEqual(f.read().strip(), "V100")
+
+    def test_corrupted_ledger_raises_error(self):
+        """Verify that load_ledger raises LedgerLoadError when file is corrupted."""
+        from utils.dna_ui import LedgerLoadError
+        ledger_file = os.path.join(self.data_dir, 'processed_ledger.json')
+        with open(ledger_file, 'w') as f:
+            f.write("NOT_A_VALID_JSON{")
+
+        with self.assertRaises(LedgerLoadError):
+            run_batch()
+
+    def test_crash_during_ledger_save(self):
+        """Simulate a crash during ledger save. Existing ledger should remain uncorrupted."""
+        from utils.dna_ui import LedgerSaveError, save_ledger
+
+        ledger_file = os.path.join(self.data_dir, 'processed_ledger.json')
+        # Write some initial valid ledger data
+        initial_ledger = {"INITIAL": {"terminal_outcome": "success", "timestamp": "2025-01-01"}}
+        save_ledger(ledger_file, initial_ledger)
+
+        # We patch json.dump specifically for ledger saving
+        original_json_dump = json.dump
+
+        def mock_json_dump(obj, fp, **kwargs):
+            if hasattr(fp, 'name') and 'ledger.json' in fp.name:
+                raise IOError("Write failed: Disk full during ledger save")
+            return original_json_dump(obj, fp, **kwargs)
+
+        with patch('json.dump', side_effect=mock_json_dump):
+            with self.assertRaises(LedgerSaveError):
+                run_batch()
+
+        # The existing ledger should still be intact and valid
+        with open(ledger_file, 'r') as f:
+            current_data = json.load(f)
+            self.assertEqual(current_data, initial_ledger)
+
+    def test_idempotent_no_writes_when_no_new_sequences(self):
+        """Verify that if all sequences are deduplicated, no atomic writes (os.replace) occur."""
+        run_batch()
+
+        # Run again with the same input sequence
+        with patch('os.replace') as mock_replace:
+            run_batch()
+            mock_replace.assert_not_called()
 
 if __name__ == '__main__':
     unittest.main()
