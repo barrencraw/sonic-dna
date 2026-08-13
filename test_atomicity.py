@@ -48,10 +48,15 @@ class TestAtomicity(unittest.TestCase):
             }, f)
 
         self.old_cwd = os.getcwd()
+        # Copy main.py into test_dir so that path resolution based on __file__ resolves to test_dir
+        shutil.copy(os.path.join(self.old_cwd, 'main.py'), os.path.join(self.test_dir, 'main.py'))
+        sys.path.insert(0, self.test_dir)
         os.chdir(self.test_dir)
 
     def tearDown(self):
         os.chdir(self.old_cwd)
+        if self.test_dir in sys.path:
+            sys.path.remove(self.test_dir)
         shutil.rmtree(self.test_dir)
 
     def test_successful_parsing(self):
