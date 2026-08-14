@@ -4,7 +4,7 @@ main.py
 
 – If run directly (python main.py), this will launch your PySide6 GUI (ui/main_window.py),
   but also start a background watcher that “watches” data/raw/toSequence.txt. Any time
-  you append new DNA lines to that file, it automatically:
+  you append new DNA sequences to that file, it automatically:
      • calls dna_ui.main() → which parses all lines and writes JSON/CSV to data/output/
      • clears toSequence.txt so those lines aren’t re‐parsed
 
@@ -79,7 +79,7 @@ def watch_loop():
     input_file = os.path.join(raw_folder, 'toSequence.txt')
     last_content = ""
 
-    print("[Watcher] Started. Monitoring data/raw/toSequence.txt for new DNA lines…")
+    print("[Watcher] Started. Monitoring data/raw/toSequence.txt for new DNA sequences…")
     try:
         while True:
             current_content = read_raw_contents(input_file)
@@ -87,7 +87,7 @@ def watch_loop():
             # If there’s new non‐empty content that differs from last run, process it:
             if current_content.strip() and current_content != last_content:
                 timestamp = time.strftime('%Y-%m-%d %H:%M:%S')
-                print(f"[{timestamp}] New DNA detected → running parser…")
+                print(f"[{timestamp}] New DNA sequence detected → running parser…")
 
                 try:
                     run_batch()
@@ -136,7 +136,7 @@ def process_once():
         print(f"[ERROR] Input file not found: {input_file}")
         return
 
-    print("[Once‐Runner] Processing all DNA strings once…")
+    print("[Once‐Runner] Processing all DNA sequences once…")
     try:
         run_batch()
         print("[Once‐Runner] Done.")
