@@ -6,6 +6,10 @@ env/
 *.pyc
 __pycache__/
 
+# Build and distribution artifacts
+*.egg-info/
+build/
+dist/
 
 # Data/model files
 data/
