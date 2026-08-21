@@ -34,6 +34,7 @@ import threading
 import argparse
 
 # ─── Import the batch parser and the GUI window ───────────────────────────────
+import uuid
 from utils.dna_ui import main as run_batch
 from utils.providers import RngProvider
 from PySide6.QtWidgets import QApplication
@@ -90,7 +91,7 @@ def watch_loop():
                 print(f"[{timestamp}] New DNA detected → running parser…")
 
                 try:
-                    run_batch()
+                    run_batch(correlation_id=str(uuid.uuid4()))
                     # Only clear the input file if run_batch() succeeds
                     clear_input_file(input_file)
                     print(f"[{timestamp}] Parsing complete. Cleared toSequence.txt.\n")
@@ -136,9 +137,9 @@ def process_once():
         print(f"[ERROR] Input file not found: {input_file}")
         return
 
-    print("[Once‐Runner] Processing all DNA strings once…")
+    print("[Once‐Runner] Processing all DNA sequences once…")
     try:
-        run_batch()
+        run_batch(correlation_id=str(uuid.uuid4()))
         print("[Once‐Runner] Done.")
     except Exception as e:
         from utils.dna_ui import DNAProcessingError
