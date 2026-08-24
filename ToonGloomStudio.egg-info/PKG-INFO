@@ -1,0 +1,16 @@
+Metadata-Version: 2.4
+Name: ToonGloomStudio
+Version: 0.1.0
+Summary: SonicDNA and generative music app.
+Author: Your Name
+Requires-Python: >=3.10
+License-File: LICENSE.txt
+Requires-Dist: PySide6
+Requires-Dist: numpy
+Requires-Dist: scipy
+Requires-Dist: pytest
+Dynamic: author
+Dynamic: license-file
+Dynamic: requires-dist
+Dynamic: requires-python
+Dynamic: summary
