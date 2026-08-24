@@ -3,11 +3,45 @@ import os
 import json
 import csv
 import time
+import tempfile
+import shutil
 from utils.dna_calculator import DNACalculator, RuleParseError
+
+# UI Message Keys (Indifferent Tone)
+MSG_CONSEQUENCE_APPLIED = "Heat Accumulation"
+MSG_REFUSAL_REASON = "Thermal Lockout"
+MSG_NEXT_ACTION_HINT = "Wait for dissipation. The system is indifferent to your deadlines."
+
+# Systemic Parameters
+MAX_HEAT = 10.0
+HEAT_PER_SEQUENCE = 2.0
+COOLING_RATE_PER_SEC = 0.5
+
+
+class DNAProcessingError(Exception):
+    """Base class for DNA processing errors."""
+    pass
+
+
+class RuleLoadError(DNAProcessingError):
+    """Raised when rules cannot be loaded."""
+    pass
+
+
+class PersistenceError(DNAProcessingError):
+    """Raised when writing or moving output files fails."""
+    pass
+
+
+class ThermalOverloadError(DNAProcessingError):
+    """Raised when processing exceeds thermal capacity thresholds."""
+    pass
+
 
 def ensure_folder(path):
     if not os.path.isdir(path):
         os.makedirs(path, exist_ok=True)
+
 
 def read_input_file(input_path):
     """
@@ -21,6 +55,7 @@ def read_input_file(input_path):
             if s:
                 dna_list.append(s)
     return dna_list
+
 
 def flatten_parsed(rule_name, values_dict, parent_key=''):
     """
@@ -36,32 +71,23 @@ def flatten_parsed(rule_name, values_dict, parent_key=''):
             items[new_key] = v
     return items
 
-import tempfile
-import shutil
 
-class DNAProcessingError(Exception):
-    """Base class for DNA processing errors."""
-    pass
-
-class RuleLoadError(DNAProcessingError):
-    """Raised when rules cannot be loaded."""
-    pass
-
-class PersistenceError(DNAProcessingError):
-    """Raised when writing or moving output files fails."""
-    pass
 def load_ledger(ledger_path):
     if os.path.exists(ledger_path):
         try:
             with open(ledger_path, 'r', encoding='utf-8') as f:
-                return json.load(f)
+                data = json.load(f)
+                if isinstance(data, dict):
+                    return data
         except Exception:
             return {}
     return {}
 
+
 def save_ledger(ledger_path, ledger):
     with open(ledger_path, 'w', encoding='utf-8') as f:
         json.dump(ledger, f, indent=2)
+
 
 def main():
     # Determine file paths
@@ -94,6 +120,16 @@ def main():
 
     ledger = load_ledger(ledger_path)
 
+    # Load / initialize system thermal state
+    now = time.time()
+    system_state = ledger.get('system_state', {
+        'core_heat': 0.0,
+        'last_processed_timestamp': now
+    })
+    last_time = system_state.get('last_processed_timestamp', now)
+    elapsed = max(0.0, now - last_time)
+    current_heat = max(0.0, float(system_state.get('core_heat', 0.0)) - (elapsed * COOLING_RATE_PER_SEC))
+
     # 1) Load existing JSON output
     json_output_path = os.path.join(output_folder, 'toSequence_parsed.json')
     parsed_json = []
@@ -120,17 +156,37 @@ def main():
         except Exception:
             pass
 
-    from utils.dna_calculator import RuleParseError
+    # Filter out already-processed items and duplicates within batch
+    unique_unprocessed = []
+    for dna in dna_list:
+        if dna != 'system_state' and dna not in ledger and dna not in unique_unprocessed:
+            unique_unprocessed.append(dna)
 
+    if not unique_unprocessed:
+        # All items are deduplicated, update thermal state with dissipation
+        system_state['core_heat'] = current_heat
+        system_state['last_processed_timestamp'] = now
+        ledger['system_state'] = system_state
+        save_ledger(ledger_path, ledger)
+        print("[Idempotency] All inputs deduplicated. No new processing required.")
+        return
+
+    # Check thermal capacity for new processing batch
+    projected_heat = current_heat + (len(unique_unprocessed) * HEAT_PER_SEQUENCE)
+
+    if projected_heat > MAX_HEAT:
+        system_state['core_heat'] = current_heat
+        system_state['last_processed_timestamp'] = now
+        ledger['system_state'] = system_state
+        save_ledger(ledger_path, ledger)
+        refusal_msg = f"[{MSG_REFUSAL_REASON}] Heat load {projected_heat:.1f} exceeds safety threshold {MAX_HEAT:.1f}. {MSG_NEXT_ACTION_HINT}"
+        print(f"[ERROR] {refusal_msg}")
+        raise ThermalOverloadError(refusal_msg)
+
+    # Process unique unprocessed DNA strings
     new_processed_count = 0
-    for dna_str in dna_list:
-        idempotency_key = dna_str
-        if idempotency_key in ledger:
-            print(f"[Idempotency] key={idempotency_key} dedupe_hit=True terminal_outcome={ledger[idempotency_key]['terminal_outcome']}")
-            continue
-
-        print(f"[Idempotency] key={idempotency_key} dedupe_hit=False terminal_outcome=processing")
-
+    for dna_str in unique_unprocessed:
+        print(f"[Idempotency] key={dna_str} dedupe_hit=False terminal_outcome=processing")
         try:
             result = calculator.parse(dna_str)
             entry = {
@@ -140,7 +196,6 @@ def main():
             }
             parsed_json.append(entry)
 
-            # Flatten for CSV
             flat = flatten_parsed(result['rule'], result['values'])
             flat['dna'] = dna_str
             flat['rule'] = result['rule']
@@ -149,37 +204,39 @@ def main():
             outcome = "success"
 
         except RuleParseError as e:
-            # On parse error, record as error entry
             parsed_json.append({
                 'dna': dna_str,
                 'error': str(e)
             })
-            # Also put a row in CSV listing error
             flat = {'dna': dna_str, 'error': str(e)}
             csv_rows.append(flat)
             all_flattened_keys.update(flat.keys())
             outcome = f"error: {str(e)}"
 
+        ledger[dna_str] = {
+            'terminal_outcome': outcome,
+            'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
+        }
+        current_heat += HEAT_PER_SEQUENCE
+        new_processed_count += 1
+        print(f"[{MSG_CONSEQUENCE_APPLIED}] Core thermal load: {current_heat:.1f}/{MAX_HEAT:.1f} heat units.")
+
+    # Update thermal state
+    system_state['core_heat'] = current_heat
+    system_state['last_processed_timestamp'] = now
+    ledger['system_state'] = system_state
+
     # ATOMIC WRITE PATTERN:
-    # 1. Write to a temporary directory in the same filesystem as the output folder
-    # 2. Flush and sync files to ensure they are on disk
-    # 3. Rename them to their final destination (atomic on most OSes)
-
-    json_output_path = os.path.join(output_folder, 'toSequence_parsed.json')
-    csv_output_path = os.path.join(output_folder, 'toSequence_parsed.csv')
-
     with tempfile.TemporaryDirectory(dir=output_folder) as tmp_dir:
         tmp_json = os.path.join(tmp_dir, 'output.json')
         tmp_csv = os.path.join(tmp_dir, 'output.csv')
 
         try:
-            # 1) Write JSON output to temp
             with open(tmp_json, 'w', encoding='utf-8') as jf:
                 json.dump(parsed_json, jf, indent=2)
                 jf.flush()
                 os.fsync(jf.fileno())
 
-            # 2) Write CSV output to temp
             fieldnames = sorted(all_flattened_keys)
             with open(tmp_csv, 'w', newline='', encoding='utf-8') as cf:
                 writer = csv.DictWriter(cf, fieldnames=fieldnames)
@@ -190,43 +247,18 @@ def main():
                 cf.flush()
                 os.fsync(cf.fileno())
 
-            # 3) Atomic rename (commit)
-            # On Unix, os.replace is atomic. On Windows, it replaces if it exists.
             os.replace(tmp_json, json_output_path)
             os.replace(tmp_csv, csv_output_path)
 
         except Exception as e:
             raise PersistenceError("Failed to write output files atomically") from e
 
-    print(f"[OK] Parsed {len(dna_list)} DNA strings.")
-        ledger[idempotency_key] = {
-            'terminal_outcome': outcome,
-            'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
-        }
-        print(f"[Idempotency] key={idempotency_key} dedupe_hit=False terminal_outcome={outcome}")
-        new_processed_count += 1
+    save_ledger(ledger_path, ledger)
 
-    if new_processed_count > 0:
-        # Save ledger
-        save_ledger(ledger_path, ledger)
-
-        # Write JSON output
-        with open(json_output_path, 'w', encoding='utf-8') as jf:
-            json.dump(parsed_json, jf, indent=2)
-
-        # Write CSV output
-        fieldnames = sorted(all_flattened_keys)
-        with open(csv_output_path, 'w', newline='', encoding='utf-8') as cf:
-            writer = csv.DictWriter(cf, fieldnames=fieldnames)
-            writer.writeheader()
-            for row in csv_rows:
-                # Ensure every field in fieldnames
-                out = {k: row.get(k, '') for k in fieldnames}
-                writer.writerow(out)
-
-    print(f"[OK] Processed {new_processed_count} new DNA strings. Total in ledger: {len(ledger)}")
+    print(f"[OK] Processed {new_processed_count} new DNA strings. Total in ledger: {len(ledger) - 1}")
     print(f"     JSON → {json_output_path}")
     print(f"     CSV  → {csv_output_path}")
+
 
 if __name__ == '__main__':
     main()
