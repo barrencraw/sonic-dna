@@ -57,8 +57,9 @@ class TestIdempotency(unittest.TestCase):
 
         with open(self.ledger_path, 'r') as f:
             ledger = json.load(f)
-        self.assertIn(dna, ledger)
-        self.assertEqual(ledger[dna]['terminal_outcome'], 'success')
+        processed_ledger = ledger.get('ledger', ledger)
+        self.assertIn(dna, processed_ledger)
+        self.assertEqual(processed_ledger[dna]['terminal_outcome'], 'success')
 
         # 2. Second invocation with same DNA
         with open(self.input_file, 'w') as f:
@@ -100,13 +101,11 @@ class TestIdempotency(unittest.TestCase):
 
         with open(self.ledger_path, 'r') as f:
             ledger = json.load(f)
-        self.assertIn(dna, ledger)
+        processed_ledger = ledger.get('ledger', ledger)
+        self.assertIn(dna, processed_ledger)
 
         # Simulate a crash where the output file was lost but ledger remained (or vice-versa)
         # If output file is lost, next run should NOT re-process if it's in the ledger.
-        # WAIT: The requirement is "retry after transient failure → eventual consistency without corruption".
-        # If the output file is cumulative and we lose it, but keep the ledger, we might miss the data.
-        # But idempotency usually means "don't do it again if you already did it".
 
         # Let's test if it handles corrupted output file gracefully.
         with open(self.json_output, 'w') as f:
