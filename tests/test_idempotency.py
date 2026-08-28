@@ -40,6 +40,13 @@ class TestIdempotency(unittest.TestCase):
             if os.path.exists(self.backup_folder):
                 shutil.move(self.backup_folder, self.data_folder)
 
+    def _get_ledger(self):
+        with open(self.ledger_path, 'r') as f:
+            data = json.load(f)
+        if isinstance(data, dict) and 'ledger' in data:
+            return data['ledger']
+        return data
+
     def test_double_invocation_same_key(self):
         # DNA for Volume (prefix 'VOL')
         dna = "VOL08900750712"
@@ -55,8 +62,7 @@ class TestIdempotency(unittest.TestCase):
         self.assertEqual(len(data), 1)
         self.assertEqual(data[0]['dna'], dna)
 
-        with open(self.ledger_path, 'r') as f:
-            ledger = json.load(f)
+        ledger = self._get_ledger()
         self.assertIn(dna, ledger)
         self.assertEqual(ledger[dna]['terminal_outcome'], 'success')
 
@@ -98,8 +104,7 @@ class TestIdempotency(unittest.TestCase):
 
         run_batch() # Success
 
-        with open(self.ledger_path, 'r') as f:
-            ledger = json.load(f)
+        ledger = self._get_ledger()
         self.assertIn(dna, ledger)
 
         # Simulate a crash where the output file was lost but ledger remained (or vice-versa)
