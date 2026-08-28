@@ -4,9 +4,9 @@ main.py
 
 – If run directly (python main.py), this will launch your PySide6 GUI (ui/main_window.py),
   but also start a background watcher that “watches” data/raw/toSequence.txt. Any time
-  you append new DNA lines to that file, it automatically:
-     • calls dna_ui.main() → which parses all lines and writes JSON/CSV to data/output/
-     • clears toSequence.txt so those lines aren’t re‐parsed
+  you append new DNA sequences to that file, it automatically:
+     • calls dna_ui.main() → which parses all sequences and writes JSON/CSV to data/output/
+     • clears toSequence.txt so those sequences aren’t re‐parsed
 
 – If you want to run only a one‐time batch parse (no GUI), you can launch with
     python main.py --once
@@ -23,18 +23,19 @@ Directory layout (relative to where this main.py lives):
   ├─ rules/                 ← all your rule_*.json files
   └─ data/
       ├─ raw/
-      │   └─ toSequence.txt ← add one DNA string per line here
+      │   └─ toSequence.txt ← add one DNA sequence per line here
       └─ output/            ← results (toSequence_parsed.json + .csv) get written here
 """
 
 import os
 import sys
 import time
+import uuid
 import threading
 import argparse
 
 # ─── Import the batch parser and the GUI window ───────────────────────────────
-from utils.dna_ui import main as run_batch
+from utils.dna_ui import main as run_batch, DNAProcessingError
 from utils.providers import RngProvider
 from PySide6.QtWidgets import QApplication
 from ui.main_window import MainWindow
@@ -68,18 +69,16 @@ def watch_loop():
     Continuously watch data/raw/toSequence.txt. Whenever new non‐empty content appears,
     run the batch parser and then clear toSequence.txt. Sleeps 1 second between checks.
     """
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    os.chdir(script_dir)
-
-    raw_folder = os.path.join(script_dir, 'data', 'raw')
-    output_folder = os.path.join(script_dir, 'data', 'output')
+    project_root = os.getcwd()
+    raw_folder = os.path.join(project_root, 'data', 'raw')
+    output_folder = os.path.join(project_root, 'data', 'output')
     ensure_folder(raw_folder)
     ensure_folder(output_folder)
 
     input_file = os.path.join(raw_folder, 'toSequence.txt')
     last_content = ""
 
-    print("[Watcher] Started. Monitoring data/raw/toSequence.txt for new DNA lines…")
+    print("[Watcher] Started. Monitoring data/raw/toSequence.txt for new DNA sequences…")
     try:
         while True:
             current_content = read_raw_contents(input_file)
@@ -87,16 +86,15 @@ def watch_loop():
             # If there’s new non‐empty content that differs from last run, process it:
             if current_content.strip() and current_content != last_content:
                 timestamp = time.strftime('%Y-%m-%d %H:%M:%S')
-                print(f"[{timestamp}] New DNA detected → running parser…")
+                print(f"[{timestamp}] New DNA sequence detected → running parser…")
 
                 try:
-                    run_batch()
+                    cid = str(uuid.uuid4())
+                    run_batch(correlation_id=cid, actor_id="watcher")
                     # Only clear the input file if run_batch() succeeds
                     clear_input_file(input_file)
                     print(f"[{timestamp}] Parsing complete. Cleared toSequence.txt.\n")
                 except Exception as e:
-                    # Classify errors
-                    from utils.dna_ui import DNAProcessingError
                     if isinstance(e, DNAProcessingError):
                         print(f"[{timestamp}][Watcher][CRITICAL] DNA processing failed: {e}")
                     else:
@@ -123,11 +121,9 @@ def process_once():
     Run the batch parser exactly once (reads all lines from toSequence.txt,
     writes output JSON+CSV, then exits).
     """
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    os.chdir(script_dir)
-
-    raw_folder = os.path.join(script_dir, 'data', 'raw')
-    output_folder = os.path.join(script_dir, 'data', 'output')
+    project_root = os.getcwd()
+    raw_folder = os.path.join(project_root, 'data', 'raw')
+    output_folder = os.path.join(project_root, 'data', 'output')
     ensure_folder(raw_folder)
     ensure_folder(output_folder)
 
@@ -136,12 +132,12 @@ def process_once():
         print(f"[ERROR] Input file not found: {input_file}")
         return
 
-    print("[Once‐Runner] Processing all DNA strings once…")
+    print("[Once‐Runner] Processing all DNA sequences once…")
     try:
-        run_batch()
+        cid = str(uuid.uuid4())
+        run_batch(correlation_id=cid, actor_id="batch_parser")
         print("[Once‐Runner] Done.")
     except Exception as e:
-        from utils.dna_ui import DNAProcessingError
         if isinstance(e, DNAProcessingError):
             print(f"[Once‐Runner][CRITICAL] DNA processing failed: {e}")
         else:
