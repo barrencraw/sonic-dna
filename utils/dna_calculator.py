@@ -21,23 +21,23 @@ class Rule:
         for subvar_name, subvar_schema in self.subvars.items():
             self.plan.append((subvar_name, subvar_schema))
 
-    def parse(self, dna_string):
+    def parse(self, dna_sequence):
         """
-        Given a DNA string (complete, including prefix), return a nested dict:
+        Given a DNA sequence (complete, including prefix), return a nested dict:
         { subvar_name: value or {child: ...}, ... }.
         """
-        if not dna_string.startswith(self.prefix):
-            raise RuleParseError(f"DNA '{dna_string}' does not start with prefix '{self.prefix}'")
+        if not dna_sequence.startswith(self.prefix):
+            raise RuleParseError(f"DNA sequence '{dna_sequence}' does not start with prefix '{self.prefix}'")
         idx = len(self.prefix)
         values = {}
         for subvar_name, subvar_schema in self.plan:
-            val, idx = self._parse_subvar(subvar_schema, dna_string, idx)
+            val, idx = self._parse_subvar(subvar_schema, dna_sequence, idx)
             values[subvar_name] = val
-        # If idx != len(dna_string), leftover characters
-        if idx != len(dna_string):
+        # If idx != len(dna_sequence), leftover characters
+        if idx != len(dna_sequence):
             raise RuleParseError(
                 f"Extra characters after parsing rule '{self.variable}': "
-                f"parsed up to index {idx}, string length {len(dna_string)}"
+                f"parsed up to index {idx}, string length {len(dna_sequence)}"
             )
         return values
 
@@ -263,17 +263,17 @@ class DNACalculator:
                     raise RuleParseError(f"Duplicate prefix '{rule.prefix}' in {fname}")
                 self.rules[rule.prefix] = rule
 
-    def parse(self, dna_string):
+    def parse(self, dna_sequence):
         """
         Identify which rule applies (by prefix), then parse.
         Returns { 'rule': variable_name, 'values': nested_dict }.
         """
         # Try to match any known prefix
         for prefix, rule in self.rules.items():
-            if dna_string.startswith(prefix):
-                parsed = rule.parse(dna_string)
+            if dna_sequence.startswith(prefix):
+                parsed = rule.parse(dna_sequence)
                 return {'rule': rule.variable, 'values': parsed}
-        raise RuleParseError(f"No matching rule for DNA '{dna_string}'")
+        raise RuleParseError(f"No matching rule for DNA sequence '{dna_sequence}'")
 
     def serialize(self, variable_name, values_dict):
         """
