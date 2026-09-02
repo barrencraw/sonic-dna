@@ -7,8 +7,6 @@ setup(
     packages=find_packages(),
     install_requires=[
         "PySide6",
-        "torch",
-        "torchaudio",
         "numpy",
         "scipy",
         "sounddevice",
@@ -23,6 +21,4 @@ setup(
     author="Your Name",
     description="SonicDNA and generative music app.",
     python_requires=">=3.10",
-)
-
 )
