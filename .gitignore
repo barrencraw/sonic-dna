@@ -6,6 +6,10 @@ env/
 *.pyc
 __pycache__/
 
+# Build artifacts
+build/
+dist/
+*.egg-info/
 
 # Data/model files
 data/
@@ -13,9 +17,6 @@ data/
 # OS files
 .DS_Store
 Thumbs.db
-
-toongloom-venv/
-data/
 
 # Empty __init__.py files
 ui/__init__.py
