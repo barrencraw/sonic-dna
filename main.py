@@ -4,37 +4,24 @@ main.py
 
 – If run directly (python main.py), this will launch your PySide6 GUI (ui/main_window.py),
   but also start a background watcher that “watches” data/raw/toSequence.txt. Any time
-  you append new DNA lines to that file, it automatically:
-     • calls dna_ui.main() → which parses all lines and writes JSON/CSV to data/output/
-     • clears toSequence.txt so those lines aren’t re‐parsed
+  you append new DNA sequences to that file, it automatically:
+     • calls dna_ui.run_batch() → which parses all sequences and writes JSON/CSV to data/output/
+     • clears toSequence.txt so those sequences aren’t re‐parsed
 
 – If you want to run only a one‐time batch parse (no GUI), you can launch with
     python main.py --once
   and it will parse everything in toSequence.txt exactly once, write outputs, then exit.
-
-Directory layout (relative to where this main.py lives):
-
-  /your_project_root/
-  ├─ main.py
-  ├─ dna_calculator.py
-  ├─ dna_ui.py
-  ├─ ui/
-  │   └─ main_window.py     ← your existing PySide6 window code
-  ├─ rules/                 ← all your rule_*.json files
-  └─ data/
-      ├─ raw/
-      │   └─ toSequence.txt ← add one DNA string per line here
-      └─ output/            ← results (toSequence_parsed.json + .csv) get written here
 """
 
 import os
 import sys
 import time
+import uuid
 import threading
 import argparse
 
 # ─── Import the batch parser and the GUI window ───────────────────────────────
-from utils.dna_ui import main as run_batch
+from utils.dna_ui import run_batch, DNAProcessingError, DNAStatus
 from utils.providers import RngProvider
 from PySide6.QtWidgets import QApplication
 from ui.main_window import MainWindow
@@ -66,47 +53,41 @@ def read_raw_contents(path: str) -> str:
 def watch_loop():
     """
     Continuously watch data/raw/toSequence.txt. Whenever new non‐empty content appears,
-    run the batch parser and then clear toSequence.txt. Sleeps 1 second between checks.
+    run the batch parser and then clear toSequence.txt. Sleep 1 second between checks.
     """
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    os.chdir(script_dir)
+    project_root = os.getcwd()
 
-    raw_folder = os.path.join(script_dir, 'data', 'raw')
-    output_folder = os.path.join(script_dir, 'data', 'output')
+    raw_folder = os.path.join(project_root, 'data', 'raw')
+    output_folder = os.path.join(project_root, 'data', 'output')
     ensure_folder(raw_folder)
     ensure_folder(output_folder)
 
     input_file = os.path.join(raw_folder, 'toSequence.txt')
     last_content = ""
 
-    print("[Watcher] Started. Monitoring data/raw/toSequence.txt for new DNA lines…")
+    print("[Watcher] Started. Monitoring data/raw/toSequence.txt for new DNA sequences…")
     try:
         while True:
             current_content = read_raw_contents(input_file)
 
             # If there’s new non‐empty content that differs from last run, process it:
             if current_content.strip() and current_content != last_content:
-                timestamp = time.strftime('%Y-%m-%d %H:%M:%S')
-                print(f"[{timestamp}] New DNA detected → running parser…")
+                timestamp = time.strftime('%Y-%m-%dT%H:%M:%SZ')
+                correlation_id = str(uuid.uuid4())
+                print(f"[{timestamp}] New DNA sequence detected → running parser…")
 
                 try:
-                    run_batch()
+                    run_batch(correlation_id=correlation_id, actor_id="watcher")
                     # Only clear the input file if run_batch() succeeds
                     clear_input_file(input_file)
                     print(f"[{timestamp}] Parsing complete. Cleared toSequence.txt.\n")
+                except DNAProcessingError as e:
+                    print(f"[{timestamp}][Watcher][CRITICAL] DNA processing failed: {e}")
                 except Exception as e:
-                    # Classify errors
-                    from utils.dna_ui import DNAProcessingError
-                    if isinstance(e, DNAProcessingError):
-                        print(f"[{timestamp}][Watcher][CRITICAL] DNA processing failed: {e}")
-                    else:
-                        print(f"[{timestamp}][Watcher][ERROR] Unexpected error: {e}")
-                    # In case of error, we DO NOT clear the input file so we can retry or investigate
+                    print(f"[{timestamp}][Watcher][ERROR] Unexpected error: {e}")
 
-                # Reset last_content so we’ll catch the next chunk of DNA
                 last_content = ""
             else:
-                # If the file is now empty, keep last_content = ""
                 if not current_content.strip():
                     last_content = ""
 
@@ -123,11 +104,10 @@ def process_once():
     Run the batch parser exactly once (reads all lines from toSequence.txt,
     writes output JSON+CSV, then exits).
     """
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    os.chdir(script_dir)
+    project_root = os.getcwd()
 
-    raw_folder = os.path.join(script_dir, 'data', 'raw')
-    output_folder = os.path.join(script_dir, 'data', 'output')
+    raw_folder = os.path.join(project_root, 'data', 'raw')
+    output_folder = os.path.join(project_root, 'data', 'output')
     ensure_folder(raw_folder)
     ensure_folder(output_folder)
 
@@ -136,16 +116,16 @@ def process_once():
         print(f"[ERROR] Input file not found: {input_file}")
         return
 
-    print("[Once‐Runner] Processing all DNA strings once…")
+    correlation_id = str(uuid.uuid4())
+    print("[Once‐Runner] Processing all DNA sequences once…")
     try:
-        run_batch()
+        run_batch(correlation_id=correlation_id, actor_id="once_runner")
         print("[Once‐Runner] Done.")
+    except DNAProcessingError as e:
+        print(f"[Once‐Runner][CRITICAL] DNA processing failed: {e}")
+        sys.exit(1)
     except Exception as e:
-        from utils.dna_ui import DNAProcessingError
-        if isinstance(e, DNAProcessingError):
-            print(f"[Once‐Runner][CRITICAL] DNA processing failed: {e}")
-        else:
-            print(f"[Once‐Runner][ERROR] Unexpected error: {e}")
+        print(f"[Once‐Runner][ERROR] Unexpected error: {e}")
         sys.exit(1)
 
 # ─── MAIN ENTRYPOINT ───────────────────────────────────────────────────────────
@@ -165,24 +145,15 @@ def main():
     args = parser.parse_args()
 
     if args.once:
-        # Run batch a single time, then exit
         process_once()
         return
 
-    # Otherwise: start watcher, then launch GUI
     watcher_thread = threading.Thread(target=watch_loop, daemon=True)
     watcher_thread.start()
     print("[main.py] Watcher thread started in background.")
 
-    # Launch PySide6 GUI
-    # Ensure working directory is project root
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    os.chdir(script_dir)
-
     app = QApplication(sys.argv)
-
-    # Initialize Determinism Providers
-    rng = RngProvider()  # Default non-deterministic for normal usage, or seed if needed
+    rng = RngProvider()
 
     win = MainWindow(rng=rng)
     win.show()
