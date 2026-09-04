@@ -136,7 +136,7 @@ def process_once():
         print(f"[ERROR] Input file not found: {input_file}")
         return
 
-    print("[Once‐Runner] Processing all DNA strings once…")
+    print("[Once‐Runner] Processing all DNA sequences once…")
     try:
         run_batch()
         print("[Once‐Runner] Done.")
