@@ -123,11 +123,10 @@ def process_once():
     Run the batch parser exactly once (reads all lines from toSequence.txt,
     writes output JSON+CSV, then exits).
     """
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    os.chdir(script_dir)
+    project_root = os.getcwd()
 
-    raw_folder = os.path.join(script_dir, 'data', 'raw')
-    output_folder = os.path.join(script_dir, 'data', 'output')
+    raw_folder = os.path.join(project_root, 'data', 'raw')
+    output_folder = os.path.join(project_root, 'data', 'output')
     ensure_folder(raw_folder)
     ensure_folder(output_folder)
 
