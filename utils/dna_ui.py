@@ -50,6 +50,26 @@ class RuleLoadError(DNAProcessingError):
 class PersistenceError(DNAProcessingError):
     """Raised when writing or moving output files fails."""
     pass
+
+class ThermalOverloadError(DNAProcessingError):
+    """Raised when core mainframe heat exceeds thermal capacity (Thermal Lockout)."""
+    CONSEQUENCE_APPLIED = "Heat Accumulation"
+    REFUSAL_REASON = "Thermal Lockout"
+    NEXT_ACTION_HINT = "Wait for dissipation. The system is indifferent to your deadlines."
+
+    def __init__(self, message=None, current_heat=10.0, max_heat=10.0):
+        if message is None:
+            message = (
+                f"{self.REFUSAL_REASON}: {self.CONSEQUENCE_APPLIED} ({current_heat:.1f}/{max_heat:.1f}). "
+                f"{self.NEXT_ACTION_HINT}"
+            )
+        super().__init__(message)
+        self.consequence_applied = self.CONSEQUENCE_APPLIED
+        self.refusal_reason = self.REFUSAL_REASON
+        self.next_action_hint = self.NEXT_ACTION_HINT
+        self.current_heat = current_heat
+        self.max_heat = max_heat
+
 def load_ledger(ledger_path):
     if os.path.exists(ledger_path):
         try:
@@ -92,7 +112,31 @@ def main():
         print("[WARN] No DNA strings found in toSequence.txt")
         return
 
-    ledger = load_ledger(ledger_path)
+    raw_ledger_data = load_ledger(ledger_path)
+
+    # Standardize structured ledger format vs legacy flat ledger format
+    if isinstance(raw_ledger_data, dict) and 'ledger' in raw_ledger_data and 'system_state' in raw_ledger_data:
+        ledger = raw_ledger_data['ledger']
+        system_state = raw_ledger_data['system_state']
+    else:
+        ledger = raw_ledger_data if isinstance(raw_ledger_data, dict) else {}
+        system_state = {'core_heat': 0.0, 'last_processed_timestamp': None}
+
+    # Calculate passive thermal dissipation (0.5 heat units per second)
+    current_time = time.time()
+    last_time = system_state.get('last_processed_timestamp')
+    core_heat = float(system_state.get('core_heat', 0.0))
+
+    if last_time is not None:
+        elapsed = current_time - float(last_time)
+        if elapsed > 0:
+            dissipated = elapsed * 0.5
+            core_heat = max(0.0, core_heat - dissipated)
+
+    # Check Thermal Lockout threshold before processing
+    MAX_HEAT = 10.0
+    if core_heat >= MAX_HEAT:
+        raise ThermalOverloadError(current_heat=core_heat, max_heat=MAX_HEAT)
 
     # 1) Load existing JSON output
     json_output_path = os.path.join(output_folder, 'toSequence_parsed.json')
@@ -160,45 +204,9 @@ def main():
             all_flattened_keys.update(flat.keys())
             outcome = f"error: {str(e)}"
 
-    # ATOMIC WRITE PATTERN:
-    # 1. Write to a temporary directory in the same filesystem as the output folder
-    # 2. Flush and sync files to ensure they are on disk
-    # 3. Rename them to their final destination (atomic on most OSes)
+        # Accumulate thermal heat per new sequence (2.0 heat units per new sequence)
+        core_heat += 2.0
 
-    json_output_path = os.path.join(output_folder, 'toSequence_parsed.json')
-    csv_output_path = os.path.join(output_folder, 'toSequence_parsed.csv')
-
-    with tempfile.TemporaryDirectory(dir=output_folder) as tmp_dir:
-        tmp_json = os.path.join(tmp_dir, 'output.json')
-        tmp_csv = os.path.join(tmp_dir, 'output.csv')
-
-        try:
-            # 1) Write JSON output to temp
-            with open(tmp_json, 'w', encoding='utf-8') as jf:
-                json.dump(parsed_json, jf, indent=2)
-                jf.flush()
-                os.fsync(jf.fileno())
-
-            # 2) Write CSV output to temp
-            fieldnames = sorted(all_flattened_keys)
-            with open(tmp_csv, 'w', newline='', encoding='utf-8') as cf:
-                writer = csv.DictWriter(cf, fieldnames=fieldnames)
-                writer.writeheader()
-                for row in csv_rows:
-                    out = {k: row.get(k, '') for k in fieldnames}
-                    writer.writerow(out)
-                cf.flush()
-                os.fsync(cf.fileno())
-
-            # 3) Atomic rename (commit)
-            # On Unix, os.replace is atomic. On Windows, it replaces if it exists.
-            os.replace(tmp_json, json_output_path)
-            os.replace(tmp_csv, csv_output_path)
-
-        except Exception as e:
-            raise PersistenceError("Failed to write output files atomically") from e
-
-    print(f"[OK] Parsed {len(dna_list)} DNA strings.")
         ledger[idempotency_key] = {
             'terminal_outcome': outcome,
             'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
@@ -206,23 +214,65 @@ def main():
         print(f"[Idempotency] key={idempotency_key} dedupe_hit=False terminal_outcome={outcome}")
         new_processed_count += 1
 
+        if core_heat >= MAX_HEAT:
+            system_state = {
+                'core_heat': core_heat,
+                'last_processed_timestamp': current_time
+            }
+            full_ledger_data = {
+                'ledger': ledger,
+                'system_state': system_state
+            }
+            # Save ledger state before raising overload error so thermal state persists
+            save_ledger(ledger_path, full_ledger_data)
+            raise ThermalOverloadError(current_heat=core_heat, max_heat=MAX_HEAT)
+
+    system_state = {
+        'core_heat': core_heat,
+        'last_processed_timestamp': current_time
+    }
+    full_ledger_data = {
+        'ledger': ledger,
+        'system_state': system_state
+    }
+
     if new_processed_count > 0:
-        # Save ledger
-        save_ledger(ledger_path, ledger)
+        # ATOMIC WRITE PATTERN:
+        # 1. Save ledger first (or inside transaction boundary)
+        # 2. Write outputs to temp dir and atomically replace
+        try:
+            save_ledger(ledger_path, full_ledger_data)
+        except Exception as e:
+            raise PersistenceError("Failed to save ledger") from e
 
-        # Write JSON output
-        with open(json_output_path, 'w', encoding='utf-8') as jf:
-            json.dump(parsed_json, jf, indent=2)
+        with tempfile.TemporaryDirectory(dir=output_folder) as tmp_dir:
+            tmp_json = os.path.join(tmp_dir, 'output.json')
+            tmp_csv = os.path.join(tmp_dir, 'output.csv')
 
-        # Write CSV output
-        fieldnames = sorted(all_flattened_keys)
-        with open(csv_output_path, 'w', newline='', encoding='utf-8') as cf:
-            writer = csv.DictWriter(cf, fieldnames=fieldnames)
-            writer.writeheader()
-            for row in csv_rows:
-                # Ensure every field in fieldnames
-                out = {k: row.get(k, '') for k in fieldnames}
-                writer.writerow(out)
+            try:
+                # 1) Write JSON output to temp
+                with open(tmp_json, 'w', encoding='utf-8') as jf:
+                    json.dump(parsed_json, jf, indent=2)
+                    jf.flush()
+                    os.fsync(jf.fileno())
+
+                # 2) Write CSV output to temp
+                fieldnames = sorted(all_flattened_keys)
+                with open(tmp_csv, 'w', newline='', encoding='utf-8') as cf:
+                    writer = csv.DictWriter(cf, fieldnames=fieldnames)
+                    writer.writeheader()
+                    for row in csv_rows:
+                        out = {k: row.get(k, '') for k in fieldnames}
+                        writer.writerow(out)
+                    cf.flush()
+                    os.fsync(cf.fileno())
+
+                # 3) Atomic rename (commit)
+                os.replace(tmp_json, json_output_path)
+                os.replace(tmp_csv, csv_output_path)
+
+            except Exception as e:
+                raise PersistenceError("Failed to write output files atomically") from e
 
     print(f"[OK] Processed {new_processed_count} new DNA strings. Total in ledger: {len(ledger)}")
     print(f"     JSON → {json_output_path}")
