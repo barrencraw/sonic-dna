@@ -7,13 +7,9 @@ setup(
     packages=find_packages(),
     install_requires=[
         "PySide6",
-        "torch",
-        "torchaudio",
         "numpy",
         "scipy",
-        "sounddevice",
-        "watchdog",
-        "requests"
+        "sounddevice"
     ],
     entry_points={
         "console_scripts": [
@@ -23,6 +19,4 @@ setup(
     author="Your Name",
     description="SonicDNA and generative music app.",
     python_requires=">=3.10",
-)
-
 )
