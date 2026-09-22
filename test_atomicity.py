@@ -10,6 +10,11 @@ sys.modules["PySide6.QtGui"] = mock_pyside6
 sys.modules["torch"] = MagicMock()
 sys.modules["torchaudio"] = MagicMock()
 sys.modules["sounddevice"] = MagicMock()
+sys.modules["numpy"] = MagicMock()
+mock_scipy = MagicMock()
+sys.modules["scipy"] = mock_scipy
+sys.modules["scipy.io"] = mock_scipy
+sys.modules["scipy.io.wavfile"] = mock_scipy
 
 import unittest
 import os
