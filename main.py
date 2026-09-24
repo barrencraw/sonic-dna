@@ -30,6 +30,7 @@ Directory layout (relative to where this main.py lives):
 import os
 import sys
 import time
+import uuid
 import threading
 import argparse
 
@@ -68,11 +69,10 @@ def watch_loop():
     Continuously watch data/raw/toSequence.txt. Whenever new non‐empty content appears,
     run the batch parser and then clear toSequence.txt. Sleeps 1 second between checks.
     """
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    os.chdir(script_dir)
+    project_root = os.getcwd()
 
-    raw_folder = os.path.join(script_dir, 'data', 'raw')
-    output_folder = os.path.join(script_dir, 'data', 'output')
+    raw_folder = os.path.join(project_root, 'data', 'raw')
+    output_folder = os.path.join(project_root, 'data', 'output')
     ensure_folder(raw_folder)
     ensure_folder(output_folder)
 
@@ -84,29 +84,24 @@ def watch_loop():
         while True:
             current_content = read_raw_contents(input_file)
 
-            # If there’s new non‐empty content that differs from last run, process it:
             if current_content.strip() and current_content != last_content:
                 timestamp = time.strftime('%Y-%m-%d %H:%M:%S')
                 print(f"[{timestamp}] New DNA detected → running parser…")
 
                 try:
-                    run_batch()
-                    # Only clear the input file if run_batch() succeeds
+                    correlation_id = str(uuid.uuid4())
+                    run_batch(correlation_id=correlation_id, actor_id='batch_parser')
                     clear_input_file(input_file)
                     print(f"[{timestamp}] Parsing complete. Cleared toSequence.txt.\n")
                 except Exception as e:
-                    # Classify errors
                     from utils.dna_ui import DNAProcessingError
                     if isinstance(e, DNAProcessingError):
                         print(f"[{timestamp}][Watcher][CRITICAL] DNA processing failed: {e}")
                     else:
                         print(f"[{timestamp}][Watcher][ERROR] Unexpected error: {e}")
-                    # In case of error, we DO NOT clear the input file so we can retry or investigate
 
-                # Reset last_content so we’ll catch the next chunk of DNA
                 last_content = ""
             else:
-                # If the file is now empty, keep last_content = ""
                 if not current_content.strip():
                     last_content = ""
 
@@ -123,11 +118,10 @@ def process_once():
     Run the batch parser exactly once (reads all lines from toSequence.txt,
     writes output JSON+CSV, then exits).
     """
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    os.chdir(script_dir)
+    project_root = os.getcwd()
 
-    raw_folder = os.path.join(script_dir, 'data', 'raw')
-    output_folder = os.path.join(script_dir, 'data', 'output')
+    raw_folder = os.path.join(project_root, 'data', 'raw')
+    output_folder = os.path.join(project_root, 'data', 'output')
     ensure_folder(raw_folder)
     ensure_folder(output_folder)
 
@@ -138,7 +132,8 @@ def process_once():
 
     print("[Once‐Runner] Processing all DNA strings once…")
     try:
-        run_batch()
+        correlation_id = str(uuid.uuid4())
+        run_batch(correlation_id=correlation_id, actor_id='batch_parser')
         print("[Once‐Runner] Done.")
     except Exception as e:
         from utils.dna_ui import DNAProcessingError
@@ -165,24 +160,18 @@ def main():
     args = parser.parse_args()
 
     if args.once:
-        # Run batch a single time, then exit
         process_once()
         return
 
-    # Otherwise: start watcher, then launch GUI
     watcher_thread = threading.Thread(target=watch_loop, daemon=True)
     watcher_thread.start()
     print("[main.py] Watcher thread started in background.")
 
-    # Launch PySide6 GUI
-    # Ensure working directory is project root
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    os.chdir(script_dir)
+    project_root = os.getcwd()
 
     app = QApplication(sys.argv)
 
-    # Initialize Determinism Providers
-    rng = RngProvider()  # Default non-deterministic for normal usage, or seed if needed
+    rng = RngProvider()
 
     win = MainWindow(rng=rng)
     win.show()
