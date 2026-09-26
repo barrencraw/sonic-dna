@@ -1,22 +1,19 @@
 import sys
 from unittest.mock import MagicMock
 
-# Mock dependencies before any imports
+# Mock PySide6 GUI components if PySide6 is not present or mocked
 mock_pyside6 = MagicMock()
-sys.modules["PySide6"] = mock_pyside6
-sys.modules["PySide6.QtWidgets"] = mock_pyside6
-sys.modules["PySide6.QtCore"] = mock_pyside6
-sys.modules["PySide6.QtGui"] = mock_pyside6
-sys.modules["torch"] = MagicMock()
-sys.modules["torchaudio"] = MagicMock()
-sys.modules["sounddevice"] = MagicMock()
+sys.modules.setdefault("PySide6", mock_pyside6)
+sys.modules.setdefault("PySide6.QtWidgets", mock_pyside6)
+sys.modules.setdefault("PySide6.QtCore", mock_pyside6)
+sys.modules.setdefault("PySide6.QtGui", mock_pyside6)
 
 import unittest
 import os
 import shutil
 import tempfile
 import json
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 from utils.dna_ui import main as run_batch, PersistenceError, DNAProcessingError
 
 class TestAtomicity(unittest.TestCase):
@@ -70,10 +67,11 @@ class TestAtomicity(unittest.TestCase):
             self.assertEqual(data[0]['dna'], 'V100')
 
     def test_crash_during_json_write(self):
-        """Simulate a crash during JSON writing. No output files should be created."""
-        with patch('json.dump', side_effect=IOError("Disk Full")):
-            with self.assertRaises(PersistenceError):
-                run_batch()
+        """Simulate a crash during JSON writing in temp dir. Output files should not be created."""
+        with patch('utils.dna_ui.save_ledger'):
+            with patch('json.dump', side_effect=IOError("Disk Full")):
+                with self.assertRaises(PersistenceError):
+                    run_batch()
 
         json_out = os.path.join(self.output_dir, 'toSequence_parsed.json')
         csv_out = os.path.join(self.output_dir, 'toSequence_parsed.csv')
@@ -82,7 +80,7 @@ class TestAtomicity(unittest.TestCase):
         self.assertFalse(os.path.exists(csv_out))
 
     def test_crash_during_rename(self):
-        """Simulate a crash/failure during the atomic rename. No output files should be created/updated."""
+        """Simulate a crash/failure during the atomic rename. Output files should not be replaced."""
         with patch('os.replace', side_effect=OSError("Permission Denied")):
             with self.assertRaises(PersistenceError):
                 run_batch()
@@ -95,10 +93,8 @@ class TestAtomicity(unittest.TestCase):
 
     def test_watcher_behavior_on_failure(self):
         """Test main.py's logic: if run_batch fails, input file should NOT be cleared."""
-        # Force import after mocks
-        if 'main' in sys.modules:
-            del sys.modules['main']
         import main
+        main.__file__ = os.path.join(self.test_dir, 'main.py')
 
         # We'll mock run_batch to fail
         with patch('main.run_batch', side_effect=PersistenceError("Failed")):
