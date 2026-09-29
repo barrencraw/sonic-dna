@@ -7,6 +7,11 @@ sys.modules["PySide6"] = mock_pyside6
 sys.modules["PySide6.QtWidgets"] = mock_pyside6
 sys.modules["PySide6.QtCore"] = mock_pyside6
 sys.modules["PySide6.QtGui"] = mock_pyside6
+sys.modules["numpy"] = MagicMock()
+mock_scipy = MagicMock()
+sys.modules["scipy"] = mock_scipy
+sys.modules["scipy.io"] = mock_scipy
+sys.modules["scipy.io.wavfile"] = mock_scipy
 sys.modules["torch"] = MagicMock()
 sys.modules["torchaudio"] = MagicMock()
 sys.modules["sounddevice"] = MagicMock()
@@ -16,7 +21,7 @@ import os
 import shutil
 import tempfile
 import json
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 from utils.dna_ui import main as run_batch, PersistenceError, DNAProcessingError
 
 class TestAtomicity(unittest.TestCase):
@@ -95,20 +100,18 @@ class TestAtomicity(unittest.TestCase):
 
     def test_watcher_behavior_on_failure(self):
         """Test main.py's logic: if run_batch fails, input file should NOT be cleared."""
-        # Force import after mocks
         if 'main' in sys.modules:
             del sys.modules['main']
         import main
 
-        # We'll mock run_batch to fail
-        with patch('main.run_batch', side_effect=PersistenceError("Failed")):
-            with patch('main.clear_input_file') as mock_clear:
-                with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
-                    main.process_once()
+        with patch.object(main, '__file__', os.path.join(self.test_dir, 'main.py')):
+            with patch('main.run_batch', side_effect=PersistenceError("Failed")):
+                with patch('main.clear_input_file') as mock_clear:
+                    with self.assertRaises(SystemExit):
+                        main.process_once()
 
-                mock_clear.assert_not_called()
+                    mock_clear.assert_not_called()
 
-        # Verify file still has content
         with open(self.input_file, 'r') as f:
             self.assertEqual(f.read().strip(), "V100")
 
