@@ -4,9 +4,9 @@ main.py
 
 – If run directly (python main.py), this will launch your PySide6 GUI (ui/main_window.py),
   but also start a background watcher that “watches” data/raw/toSequence.txt. Any time
-  you append new DNA lines to that file, it automatically:
-     • calls dna_ui.main() → which parses all lines and writes JSON/CSV to data/output/
-     • clears toSequence.txt so those lines aren’t re‐parsed
+  you append new DNA sequences to that file, it automatically:
+     • calls dna_ui.main() → which parses all sequences and writes JSON/CSV to data/output/
+     • clears toSequence.txt so those sequences aren’t re‐parsed
 
 – If you want to run only a one‐time batch parse (no GUI), you can launch with
     python main.py --once
@@ -68,8 +68,7 @@ def watch_loop():
     Continuously watch data/raw/toSequence.txt. Whenever new non‐empty content appears,
     run the batch parser and then clear toSequence.txt. Sleeps 1 second between checks.
     """
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    os.chdir(script_dir)
+    script_dir = os.getcwd()
 
     raw_folder = os.path.join(script_dir, 'data', 'raw')
     output_folder = os.path.join(script_dir, 'data', 'output')
@@ -79,7 +78,7 @@ def watch_loop():
     input_file = os.path.join(raw_folder, 'toSequence.txt')
     last_content = ""
 
-    print("[Watcher] Started. Monitoring data/raw/toSequence.txt for new DNA lines…")
+    print("[Watcher] Started. Monitoring data/raw/toSequence.txt for new DNA sequences…")
     try:
         while True:
             current_content = read_raw_contents(input_file)
@@ -123,8 +122,7 @@ def process_once():
     Run the batch parser exactly once (reads all lines from toSequence.txt,
     writes output JSON+CSV, then exits).
     """
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    os.chdir(script_dir)
+    script_dir = os.getcwd()
 
     raw_folder = os.path.join(script_dir, 'data', 'raw')
     output_folder = os.path.join(script_dir, 'data', 'output')
@@ -136,7 +134,7 @@ def process_once():
         print(f"[ERROR] Input file not found: {input_file}")
         return
 
-    print("[Once‐Runner] Processing all DNA strings once…")
+    print("[Once‐Runner] Processing all DNA sequences once…")
     try:
         run_batch()
         print("[Once‐Runner] Done.")
