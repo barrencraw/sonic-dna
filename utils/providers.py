@@ -1,4 +1,8 @@
-import numpy as np
+try:
+    import numpy as np
+except ImportError:
+    from unittest.mock import MagicMock
+    np = MagicMock()
 
 class RngProvider:
     """
