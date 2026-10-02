@@ -11,6 +11,20 @@ sys.modules["torch"] = MagicMock()
 sys.modules["torchaudio"] = MagicMock()
 sys.modules["sounddevice"] = MagicMock()
 
+try:
+    import numpy
+except ImportError:
+    sys.modules["numpy"] = MagicMock()
+
+try:
+    import scipy
+    import scipy.io.wavfile
+except ImportError:
+    mock_scipy = MagicMock()
+    sys.modules["scipy"] = mock_scipy
+    sys.modules["scipy.io"] = mock_scipy
+    sys.modules["scipy.io.wavfile"] = mock_scipy
+
 import unittest
 import os
 import shutil
@@ -99,6 +113,7 @@ class TestAtomicity(unittest.TestCase):
         if 'main' in sys.modules:
             del sys.modules['main']
         import main
+        main.__file__ = os.path.join(self.test_dir, 'main.py')
 
         # We'll mock run_batch to fail
         with patch('main.run_batch', side_effect=PersistenceError("Failed")):
