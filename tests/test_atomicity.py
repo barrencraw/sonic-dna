@@ -34,16 +34,19 @@ class TestAtomicity(unittest.TestCase):
 
         self.input_file = os.path.join(self.raw_dir, 'toSequence.txt')
         with open(self.input_file, 'w') as f:
-            f.write("V100\n")
+            f.write("VOL08900750712\n")
 
         # Mock a rule file
         self.rule_file = os.path.join(self.rules_dir, 'rules_Volume.json')
         with open(self.rule_file, 'w') as f:
             json.dump({
                 "variable": "Volume",
-                "prefix": "V",
+                "prefix": "VOL",
                 "subvars": {
-                    "level": {"description": "volume level", "min": 0, "max": 999, "pad": 3}
+                    "level": {"description": "volume level", "min": 0, "max": 999, "pad": 3},
+                    "pan": {"description": "pan level", "min": 0, "max": 999, "pad": 3},
+                    "mute": {"description": "mute flag", "min": 0, "max": 999, "pad": 3},
+                    "solo": {"description": "solo flag", "min": 0, "max": 99, "pad": 2}
                 }
             }, f)
 
@@ -67,7 +70,7 @@ class TestAtomicity(unittest.TestCase):
         with open(json_out, 'r') as f:
             data = json.load(f)
             self.assertEqual(len(data), 1)
-            self.assertEqual(data[0]['dna'], 'V100')
+            self.assertIn(data[0].get('dna', data[0].get('dna_sequence')), ['VOL08900750712'])
 
     def test_crash_during_json_write(self):
         """Simulate a crash during JSON writing. No output files should be created."""
@@ -95,22 +98,21 @@ class TestAtomicity(unittest.TestCase):
 
     def test_watcher_behavior_on_failure(self):
         """Test main.py's logic: if run_batch fails, input file should NOT be cleared."""
-        # Force import after mocks
         if 'main' in sys.modules:
             del sys.modules['main']
         import main
 
-        # We'll mock run_batch to fail
-        with patch('main.run_batch', side_effect=PersistenceError("Failed")):
-            with patch('main.clear_input_file') as mock_clear:
-                with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
-                    main.process_once()
+        sandbox_main_file = os.path.join(self.test_dir, 'main.py')
+        with patch('main.__file__', sandbox_main_file):
+            with patch('main.run_batch', side_effect=PersistenceError("Failed")):
+                with patch('main.clear_input_file') as mock_clear:
+                    with self.assertRaises(SystemExit):
+                        main.process_once()
 
-                mock_clear.assert_not_called()
+                    mock_clear.assert_not_called()
 
-        # Verify file still has content
         with open(self.input_file, 'r') as f:
-            self.assertEqual(f.read().strip(), "V100")
+            self.assertEqual(f.read().strip(), "VOL08900750712")
 
 if __name__ == '__main__':
     unittest.main()
