@@ -23,7 +23,7 @@ Directory layout (relative to where this main.py lives):
   ├─ rules/                 ← all your rule_*.json files
   └─ data/
       ├─ raw/
-      │   └─ toSequence.txt ← add one DNA string per line here
+      │   └─ toSequence.txt ← add one DNA sequence per line here
       └─ output/            ← results (toSequence_parsed.json + .csv) get written here
 """
 
@@ -79,7 +79,7 @@ def watch_loop():
     input_file = os.path.join(raw_folder, 'toSequence.txt')
     last_content = ""
 
-    print("[Watcher] Started. Monitoring data/raw/toSequence.txt for new DNA lines…")
+    print("[Watcher] Started. Monitoring data/raw/toSequence.txt for new DNA sequences…")
     try:
         while True:
             current_content = read_raw_contents(input_file)
@@ -136,7 +136,7 @@ def process_once():
         print(f"[ERROR] Input file not found: {input_file}")
         return
 
-    print("[Once‐Runner] Processing all DNA strings once…")
+    print("[Once‐Runner] Processing all DNA sequences once…")
     try:
         run_batch()
         print("[Once‐Runner] Done.")
