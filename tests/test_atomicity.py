@@ -3,13 +3,19 @@ from unittest.mock import MagicMock
 
 # Mock dependencies before any imports
 mock_pyside6 = MagicMock()
-sys.modules["PySide6"] = mock_pyside6
-sys.modules["PySide6.QtWidgets"] = mock_pyside6
-sys.modules["PySide6.QtCore"] = mock_pyside6
-sys.modules["PySide6.QtGui"] = mock_pyside6
-sys.modules["torch"] = MagicMock()
-sys.modules["torchaudio"] = MagicMock()
-sys.modules["sounddevice"] = MagicMock()
+sys.modules.setdefault("PySide6", mock_pyside6)
+sys.modules.setdefault("PySide6.QtWidgets", mock_pyside6)
+sys.modules.setdefault("PySide6.QtCore", mock_pyside6)
+sys.modules.setdefault("PySide6.QtGui", mock_pyside6)
+sys.modules.setdefault("torch", MagicMock())
+sys.modules.setdefault("torchaudio", MagicMock())
+sys.modules.setdefault("sounddevice", MagicMock())
+sys.modules.setdefault("numpy", MagicMock())
+sys.modules.setdefault("scipy", MagicMock())
+sys.modules.setdefault("scipy.io", MagicMock())
+sys.modules.setdefault("scipy.io.wavfile", MagicMock())
+sys.modules.setdefault("requests", MagicMock())
+sys.modules.setdefault("watchdog", MagicMock())
 
 import unittest
 import os
@@ -18,6 +24,7 @@ import tempfile
 import json
 from unittest.mock import patch, MagicMock
 from utils.dna_ui import main as run_batch, PersistenceError, DNAProcessingError
+
 
 class TestAtomicity(unittest.TestCase):
     def setUp(self):
@@ -33,12 +40,12 @@ class TestAtomicity(unittest.TestCase):
         os.makedirs(self.rules_dir)
 
         self.input_file = os.path.join(self.raw_dir, 'toSequence.txt')
-        with open(self.input_file, 'w') as f:
+        with open(self.input_file, 'w', encoding='utf-8') as f:
             f.write("V100\n")
 
         # Mock a rule file
         self.rule_file = os.path.join(self.rules_dir, 'rules_Volume.json')
-        with open(self.rule_file, 'w') as f:
+        with open(self.rule_file, 'w', encoding='utf-8') as f:
             json.dump({
                 "variable": "Volume",
                 "prefix": "V",
@@ -64,7 +71,7 @@ class TestAtomicity(unittest.TestCase):
         self.assertTrue(os.path.exists(json_out))
         self.assertTrue(os.path.exists(csv_out))
 
-        with open(json_out, 'r') as f:
+        with open(json_out, 'r', encoding='utf-8') as f:
             data = json.load(f)
             self.assertEqual(len(data), 1)
             self.assertEqual(data[0]['dna'], 'V100')
@@ -95,22 +102,24 @@ class TestAtomicity(unittest.TestCase):
 
     def test_watcher_behavior_on_failure(self):
         """Test main.py's logic: if run_batch fails, input file should NOT be cleared."""
-        # Force import after mocks
         if 'main' in sys.modules:
             del sys.modules['main']
         import main
 
+        main.__file__ = os.path.join(self.test_dir, 'main.py')
+
         # We'll mock run_batch to fail
         with patch('main.run_batch', side_effect=PersistenceError("Failed")):
             with patch('main.clear_input_file') as mock_clear:
-                with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
+                with self.assertRaises(SystemExit):  # process_once calls sys.exit(1) on failure
                     main.process_once()
 
                 mock_clear.assert_not_called()
 
         # Verify file still has content
-        with open(self.input_file, 'r') as f:
+        with open(self.input_file, 'r', encoding='utf-8') as f:
             self.assertEqual(f.read().strip(), "V100")
+
 
 if __name__ == '__main__':
     unittest.main()
