@@ -2,14 +2,11 @@ import sys
 from unittest.mock import MagicMock
 
 # Mock dependencies before any imports
-mock_pyside6 = MagicMock()
-sys.modules["PySide6"] = mock_pyside6
-sys.modules["PySide6.QtWidgets"] = mock_pyside6
-sys.modules["PySide6.QtCore"] = mock_pyside6
-sys.modules["PySide6.QtGui"] = mock_pyside6
-sys.modules["torch"] = MagicMock()
-sys.modules["torchaudio"] = MagicMock()
-sys.modules["sounddevice"] = MagicMock()
+for mod in [
+    "PySide6", "PySide6.QtWidgets", "PySide6.QtCore", "PySide6.QtGui",
+    "torch", "torchaudio", "sounddevice", "numpy", "scipy", "scipy.io", "scipy.io.wavfile"
+]:
+    sys.modules[mod] = MagicMock()
 
 import unittest
 import os
@@ -34,14 +31,14 @@ class TestAtomicity(unittest.TestCase):
 
         self.input_file = os.path.join(self.raw_dir, 'toSequence.txt')
         with open(self.input_file, 'w') as f:
-            f.write("V100\n")
+            f.write("VOL08900750712\n")
 
         # Mock a rule file
         self.rule_file = os.path.join(self.rules_dir, 'rules_Volume.json')
         with open(self.rule_file, 'w') as f:
             json.dump({
                 "variable": "Volume",
-                "prefix": "V",
+                "prefix": "VOL",
                 "subvars": {
                     "level": {"description": "volume level", "min": 0, "max": 999, "pad": 3}
                 }
@@ -67,7 +64,7 @@ class TestAtomicity(unittest.TestCase):
         with open(json_out, 'r') as f:
             data = json.load(f)
             self.assertEqual(len(data), 1)
-            self.assertEqual(data[0]['dna'], 'V100')
+            self.assertEqual(data[0]['dna_sequence'], 'VOL08900750712')
 
     def test_crash_during_json_write(self):
         """Simulate a crash during JSON writing. No output files should be created."""
@@ -95,22 +92,20 @@ class TestAtomicity(unittest.TestCase):
 
     def test_watcher_behavior_on_failure(self):
         """Test main.py's logic: if run_batch fails, input file should NOT be cleared."""
-        # Force import after mocks
         if 'main' in sys.modules:
             del sys.modules['main']
         import main
+        main.__file__ = os.path.join(self.test_dir, 'main.py')
 
-        # We'll mock run_batch to fail
         with patch('main.run_batch', side_effect=PersistenceError("Failed")):
             with patch('main.clear_input_file') as mock_clear:
-                with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
+                with self.assertRaises(SystemExit):
                     main.process_once()
 
                 mock_clear.assert_not_called()
 
-        # Verify file still has content
         with open(self.input_file, 'r') as f:
-            self.assertEqual(f.read().strip(), "V100")
+            self.assertEqual(f.read().strip(), "VOL08900750712")
 
 if __name__ == '__main__':
     unittest.main()
