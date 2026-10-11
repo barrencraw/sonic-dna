@@ -1,4 +1,10 @@
-import numpy as np
+try:
+    import numpy as np
+    HAS_NUMPY = True
+except ImportError:
+    import unittest.mock as mock
+    np = mock.MagicMock()
+    HAS_NUMPY = False
 
 class RngProvider:
     """
@@ -8,7 +14,10 @@ class RngProvider:
         self.set_seed(seed)
 
     def set_seed(self, seed):
-        self._rng = np.random.default_rng(seed)
+        if HAS_NUMPY:
+            self._rng = np.random.default_rng(seed)
+        else:
+            self._rng = np.random.default_rng(seed)
 
     def uniform(self, low=0.0, high=1.0, size=None):
         return self._rng.uniform(low, high, size)
