@@ -56,7 +56,7 @@ class TestAtomicity(unittest.TestCase):
 
     def test_successful_parsing(self):
         """Verify that parsing works correctly under normal conditions."""
-        run_batch()
+        run_batch(self.test_dir)
 
         json_out = os.path.join(self.output_dir, 'toSequence_parsed.json')
         csv_out = os.path.join(self.output_dir, 'toSequence_parsed.csv')
@@ -73,7 +73,7 @@ class TestAtomicity(unittest.TestCase):
         """Simulate a crash during JSON writing. No output files should be created."""
         with patch('json.dump', side_effect=IOError("Disk Full")):
             with self.assertRaises(PersistenceError):
-                run_batch()
+                run_batch(self.test_dir)
 
         json_out = os.path.join(self.output_dir, 'toSequence_parsed.json')
         csv_out = os.path.join(self.output_dir, 'toSequence_parsed.csv')
@@ -85,7 +85,7 @@ class TestAtomicity(unittest.TestCase):
         """Simulate a crash/failure during the atomic rename. No output files should be created/updated."""
         with patch('os.replace', side_effect=OSError("Permission Denied")):
             with self.assertRaises(PersistenceError):
-                run_batch()
+                run_batch(self.test_dir)
 
         json_out = os.path.join(self.output_dir, 'toSequence_parsed.json')
         csv_out = os.path.join(self.output_dir, 'toSequence_parsed.csv')
@@ -100,13 +100,14 @@ class TestAtomicity(unittest.TestCase):
             del sys.modules['main']
         import main
 
-        # We'll mock run_batch to fail
-        with patch('main.run_batch', side_effect=PersistenceError("Failed")):
-            with patch('main.clear_input_file') as mock_clear:
-                with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
-                    main.process_once()
+        # Patch main.__file__ to point to temporary sandbox directory
+        with patch.object(main, '__file__', os.path.join(self.test_dir, 'main.py')):
+            with patch('main.run_batch', side_effect=PersistenceError("Failed")):
+                with patch('main.clear_input_file') as mock_clear:
+                    with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
+                        main.process_once()
 
-                mock_clear.assert_not_called()
+                    mock_clear.assert_not_called()
 
         # Verify file still has content
         with open(self.input_file, 'r') as f:
