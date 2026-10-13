@@ -1,9 +1,20 @@
-import numpy as np
+try:
+    import numpy as np
+    HAS_NUMPY = True
+except ImportError:
+    np = None
+    HAS_NUMPY = False
+
 try:
     import sounddevice as sd
-except OSError:
+except (OSError, ImportError):
     sd = None
-from scipy.io.wavfile import write as write_wav
+
+try:
+    from scipy.io.wavfile import write as write_wav
+except ImportError:
+    write_wav = None
+
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFileDialog, QComboBox
@@ -40,6 +51,9 @@ BASE_SOUNDS = [
 ]
 
 def gen_wave(wave_type, volume=0.8, rng=None):
+    if not HAS_NUMPY or np is None:
+        raise RuntimeError("numpy is required for gen_wave")
+
     t = np.linspace(0, DURATION, int(SAMPLE_RATE * DURATION), endpoint=False)
 
     if rng is None:
@@ -141,11 +155,17 @@ def gen_wave(wave_type, volume=0.8, rng=None):
 class WaveformWidget(QWidget):
     def __init__(self):
         super().__init__()
-        self.data = np.zeros(512)
+        if HAS_NUMPY and np is not None:
+            self.data = np.zeros(512)
+        else:
+            self.data = [0] * 512
         self.setMinimumHeight(140)
 
     def set_wave(self, data):
-        self.data = data[:512] if len(data) > 512 else np.pad(data, (0, max(0, 512 - len(data))))
+        if HAS_NUMPY and np is not None:
+            self.data = data[:512] if len(data) > 512 else np.pad(data, (0, max(0, 512 - len(data))))
+        else:
+            self.data = list(data[:512])
         self.update()
 
     def paintEvent(self, event):
@@ -198,9 +218,12 @@ class MusicPanel(QWidget):
         self.sound_selector.currentTextChanged.connect(self.update_waveform)
         self.play_btn.clicked.connect(self.toggle_play)
 
-        self.update_waveform()  # Initialize display
+        if HAS_NUMPY and np is not None:
+            self.update_waveform()  # Initialize display
 
     def update_waveform(self):
+        if not HAS_NUMPY or np is None:
+            return
         wave_type = self.sound_selector.currentText()
         data = gen_wave(wave_type, rng=self.rng)
         self.current_wave = data
@@ -223,7 +246,7 @@ class MusicPanel(QWidget):
                 sd.stop()
 
     def download_wave(self):
-        if self.current_wave is not None:
+        if self.current_wave is not None and write_wav is not None and HAS_NUMPY:
             file_path, _ = QFileDialog.getSaveFileName(self, "Save WAV File", "sound.wav", "WAV Files (*.wav)")
             if file_path:
                 # Normalize to 16-bit PCM for WAV export
