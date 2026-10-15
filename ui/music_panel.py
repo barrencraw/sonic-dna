@@ -1,9 +1,18 @@
-import numpy as np
+try:
+    import numpy as np
+except (ImportError, ModuleNotFoundError):
+    from utils.providers import np
+
 try:
     import sounddevice as sd
-except OSError:
+except (ImportError, ModuleNotFoundError, OSError):
     sd = None
-from scipy.io.wavfile import write as write_wav
+
+try:
+    from scipy.io.wavfile import write as write_wav
+except (ImportError, ModuleNotFoundError):
+    write_wav = None
+
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFileDialog, QComboBox
@@ -223,7 +232,7 @@ class MusicPanel(QWidget):
                 sd.stop()
 
     def download_wave(self):
-        if self.current_wave is not None:
+        if self.current_wave is not None and write_wav is not None:
             file_path, _ = QFileDialog.getSaveFileName(self, "Save WAV File", "sound.wav", "WAV Files (*.wav)")
             if file_path:
                 # Normalize to 16-bit PCM for WAV export
