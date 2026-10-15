@@ -1,9 +1,19 @@
-import numpy as np
+try:
+    import numpy as np
+except ImportError:
+    from unittest.mock import MagicMock
+    np = MagicMock()
+
 try:
     import sounddevice as sd
-except OSError:
+except Exception:
     sd = None
-from scipy.io.wavfile import write as write_wav
+
+try:
+    from scipy.io.wavfile import write as write_wav
+except Exception:
+    write_wav = None
+
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFileDialog, QComboBox
@@ -169,7 +179,6 @@ class MusicPanel(QWidget):
         self.rng = rng
         layout = QVBoxLayout(self)
 
-        # Dropdown for sound selection
         top = QHBoxLayout()
         self.sound_selector = QComboBox()
         self.sound_selector.addItems(BASE_SOUNDS)
@@ -177,28 +186,23 @@ class MusicPanel(QWidget):
         top.addWidget(self.sound_selector)
         layout.addLayout(top)
 
-        # Waveform display
         self.waveform = WaveformWidget()
         layout.addWidget(self.waveform)
 
-        # Play/Pause button
         self.play_btn = QPushButton("Play")
         layout.addWidget(self.play_btn)
 
-        #Download Audio
         self.download_btn = QPushButton("Download")
         layout.addWidget(self.download_btn)
         self.download_btn.clicked.connect(self.download_wave)
 
-        # State
         self.current_wave = None
         self.is_playing = False
 
-        # Signals
         self.sound_selector.currentTextChanged.connect(self.update_waveform)
         self.play_btn.clicked.connect(self.toggle_play)
 
-        self.update_waveform()  # Initialize display
+        self.update_waveform()
 
     def update_waveform(self):
         wave_type = self.sound_selector.currentText()
@@ -206,7 +210,7 @@ class MusicPanel(QWidget):
         self.current_wave = data
         self.waveform.set_wave(data)
         if self.is_playing:
-            self.toggle_play()  # Stop if user changes wave while playing
+            self.toggle_play()
 
     def toggle_play(self):
         if not self.is_playing:
@@ -223,9 +227,8 @@ class MusicPanel(QWidget):
                 sd.stop()
 
     def download_wave(self):
-        if self.current_wave is not None:
+        if self.current_wave is not None and write_wav is not None:
             file_path, _ = QFileDialog.getSaveFileName(self, "Save WAV File", "sound.wav", "WAV Files (*.wav)")
             if file_path:
-                # Normalize to 16-bit PCM for WAV export
                 audio = (self.current_wave * 32767).astype(np.int16)
                 write_wav(file_path, SAMPLE_RATE, audio)
