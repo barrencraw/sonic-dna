@@ -89,8 +89,10 @@ def watch_loop():
                 timestamp = time.strftime('%Y-%m-%d %H:%M:%S')
                 print(f"[{timestamp}] New DNA detected → running parser…")
 
+                import uuid
+                batch_cid = str(uuid.uuid4())
                 try:
-                    run_batch()
+                    run_batch(correlation_id=batch_cid, actor_id="watcher")
                     # Only clear the input file if run_batch() succeeds
                     clear_input_file(input_file)
                     print(f"[{timestamp}] Parsing complete. Cleared toSequence.txt.\n")
@@ -136,9 +138,11 @@ def process_once():
         print(f"[ERROR] Input file not found: {input_file}")
         return
 
-    print("[Once‐Runner] Processing all DNA strings once…")
+    print("[Once‐Runner] Processing all DNA sequences once…")
+    import uuid
+    once_cid = str(uuid.uuid4())
     try:
-        run_batch()
+        run_batch(correlation_id=once_cid, actor_id="once_runner")
         print("[Once‐Runner] Done.")
     except Exception as e:
         from utils.dna_ui import DNAProcessingError
