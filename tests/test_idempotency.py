@@ -40,6 +40,11 @@ class TestIdempotency(unittest.TestCase):
             if os.path.exists(self.backup_folder):
                 shutil.move(self.backup_folder, self.data_folder)
 
+    def _get_ledger_entries(self):
+        with open(self.ledger_path, 'r') as f:
+            data = json.load(f)
+        return data.get('ledger', data)
+
     def test_double_invocation_same_key(self):
         # DNA for Volume (prefix 'VOL')
         dna = "VOL08900750712"
@@ -55,8 +60,7 @@ class TestIdempotency(unittest.TestCase):
         self.assertEqual(len(data), 1)
         self.assertEqual(data[0]['dna'], dna)
 
-        with open(self.ledger_path, 'r') as f:
-            ledger = json.load(f)
+        ledger = self._get_ledger_entries()
         self.assertIn(dna, ledger)
         self.assertEqual(ledger[dna]['terminal_outcome'], 'success')
 
@@ -89,8 +93,6 @@ class TestIdempotency(unittest.TestCase):
         self.assertIn(dna2, dnas)
 
     def test_retry_after_transient_failure(self):
-        # We'll simulate a transient failure by corrupting the output after a successful process
-        # and then re-running.
         dna = "VOL08900750712"
 
         with open(self.input_file, 'w') as f:
@@ -98,17 +100,9 @@ class TestIdempotency(unittest.TestCase):
 
         run_batch() # Success
 
-        with open(self.ledger_path, 'r') as f:
-            ledger = json.load(f)
+        ledger = self._get_ledger_entries()
         self.assertIn(dna, ledger)
 
-        # Simulate a crash where the output file was lost but ledger remained (or vice-versa)
-        # If output file is lost, next run should NOT re-process if it's in the ledger.
-        # WAIT: The requirement is "retry after transient failure → eventual consistency without corruption".
-        # If the output file is cumulative and we lose it, but keep the ledger, we might miss the data.
-        # But idempotency usually means "don't do it again if you already did it".
-
-        # Let's test if it handles corrupted output file gracefully.
         with open(self.json_output, 'w') as f:
             f.write("CORRUPTED")
 
@@ -116,13 +110,11 @@ class TestIdempotency(unittest.TestCase):
         with open(self.input_file, 'w') as f:
             f.write(new_dna + "\n")
 
-        run_batch() # This should load the corrupted file, reset it to [], and add the new_dna
+        run_batch()
 
         with open(self.json_output, 'r') as f:
             data = json.load(f)
 
-        # Since VOL08900750712 was in the ledger, it was NOT re-processed.
-        # Only VOL00000000000 is in the new output.
         self.assertEqual(len(data), 1)
         self.assertEqual(data[0]['dna'], new_dna)
 
