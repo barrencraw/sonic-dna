@@ -1,4 +1,7 @@
-import numpy as np
+try:
+    import numpy as np
+except ImportError:
+    np = None
 
 class RngProvider:
     """
@@ -8,13 +11,25 @@ class RngProvider:
         self.set_seed(seed)
 
     def set_seed(self, seed):
-        self._rng = np.random.default_rng(seed)
+        if np is not None:
+            self._rng = np.random.default_rng(seed)
+        else:
+            self._rng = None
 
     def uniform(self, low=0.0, high=1.0, size=None):
-        return self._rng.uniform(low, high, size)
+        if self._rng is not None:
+            return self._rng.uniform(low, high, size)
+        import random
+        return random.uniform(low, high)
 
     def standard_normal(self, size=None):
-        return self._rng.standard_normal(size)
+        if self._rng is not None:
+            return self._rng.standard_normal(size)
+        import random
+        return random.gauss(0.0, 1.0)
 
     def normal(self, loc=0.0, scale=1.0, size=None):
-        return self._rng.normal(loc, scale, size)
+        if self._rng is not None:
+            return self._rng.normal(loc, scale, size)
+        import random
+        return random.gauss(loc, scale)
