@@ -1,14 +1,28 @@
-import numpy as np
+try:
+    import numpy as np
+except ImportError:
+    np = None
+
 try:
     import sounddevice as sd
-except OSError:
+except (ImportError, OSError):
     sd = None
-from scipy.io.wavfile import write as write_wav
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFileDialog, QComboBox
-)
-from PySide6.QtGui import QPainter, QPen, QColor
+
+try:
+    from scipy.io.wavfile import write as write_wav
+except ImportError:
+    write_wav = None
+
+try:
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import (
+        QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFileDialog, QComboBox
+    )
+    from PySide6.QtGui import QPainter, QPen, QColor
+except ImportError:
+    QWidget = object
+    QVBoxLayout = QHBoxLayout = QLabel = QPushButton = QFileDialog = QComboBox = None
+    QPainter = QPen = QColor = Qt = None
 
 SAMPLE_RATE = 44100
 DURATION = 2.0
@@ -40,6 +54,17 @@ BASE_SOUNDS = [
 ]
 
 def gen_wave(wave_type, volume=0.8, rng=None):
+    if np is None:
+        import math
+        num_samples = int(SAMPLE_RATE * DURATION)
+        t = [i / SAMPLE_RATE for i in range(num_samples)]
+        if wave_type == "Sine Wave":
+            return [volume * math.sin(2 * math.pi * FREQ * ts) for ts in t]
+        elif wave_type == "Silence":
+            return [0.0] * num_samples
+        else:
+            return [0.0] * num_samples
+
     t = np.linspace(0, DURATION, int(SAMPLE_RATE * DURATION), endpoint=False)
 
     if rng is None:
@@ -141,14 +166,21 @@ def gen_wave(wave_type, volume=0.8, rng=None):
 class WaveformWidget(QWidget):
     def __init__(self):
         super().__init__()
-        self.data = np.zeros(512)
-        self.setMinimumHeight(140)
+        self.data = np.zeros(512) if np is not None else [0]*512
+        if hasattr(self, 'setMinimumHeight'):
+            self.setMinimumHeight(140)
 
     def set_wave(self, data):
-        self.data = data[:512] if len(data) > 512 else np.pad(data, (0, max(0, 512 - len(data))))
-        self.update()
+        if np is not None:
+            self.data = data[:512] if len(data) > 512 else np.pad(data, (0, max(0, 512 - len(data))))
+        else:
+            self.data = data[:512]
+        if hasattr(self, 'update'):
+            self.update()
 
     def paintEvent(self, event):
+        if QPainter is None:
+            return
         qp = QPainter(self)
         qp.fillRect(event.rect(), Qt.black)
         w, h = self.width(), self.height()
@@ -167,6 +199,8 @@ class MusicPanel(QWidget):
     def __init__(self, rng=None):
         super().__init__()
         self.rng = rng
+        if QVBoxLayout is None:
+            return
         layout = QVBoxLayout(self)
 
         # Dropdown for sound selection
@@ -201,6 +235,8 @@ class MusicPanel(QWidget):
         self.update_waveform()  # Initialize display
 
     def update_waveform(self):
+        if not hasattr(self, 'sound_selector'):
+            return
         wave_type = self.sound_selector.currentText()
         data = gen_wave(wave_type, rng=self.rng)
         self.current_wave = data
@@ -211,19 +247,21 @@ class MusicPanel(QWidget):
     def toggle_play(self):
         if not self.is_playing:
             self.is_playing = True
-            self.play_btn.setText("Pause")
+            if hasattr(self, 'play_btn'):
+                self.play_btn.setText("Pause")
             if sd:
                 sd.play(self.current_wave, samplerate=SAMPLE_RATE)
             else:
                 print("Sounddevice not available, cannot play.")
         else:
             self.is_playing = False
-            self.play_btn.setText("Play")
+            if hasattr(self, 'play_btn'):
+                self.play_btn.setText("Play")
             if sd:
                 sd.stop()
 
     def download_wave(self):
-        if self.current_wave is not None:
+        if self.current_wave is not None and write_wav is not None:
             file_path, _ = QFileDialog.getSaveFileName(self, "Save WAV File", "sound.wav", "WAV Files (*.wav)")
             if file_path:
                 # Normalize to 16-bit PCM for WAV export
