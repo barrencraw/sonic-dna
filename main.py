@@ -120,7 +120,7 @@ def watch_loop():
 
 def process_once():
     """
-    Run the batch parser exactly once (reads all lines from toSequence.txt,
+    Run the batch parser exactly once (reads all DNA sequences from toSequence.txt,
     writes output JSON+CSV, then exits).
     """
     script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -136,7 +136,7 @@ def process_once():
         print(f"[ERROR] Input file not found: {input_file}")
         return
 
-    print("[Once‐Runner] Processing all DNA strings once…")
+    print("[Once‐Runner] Processing all DNA sequences once…")
     try:
         run_batch()
         print("[Once‐Runner] Done.")
