@@ -1,9 +1,15 @@
-import numpy as np
-import pytest
+import unittest
+try:
+    import numpy as np
+    HAS_NUMPY = True
+except ImportError:
+    np = None
+    HAS_NUMPY = False
+
 from ui.music_panel import gen_wave
 from utils.providers import RngProvider
 
-@pytest.mark.parametrize("wave_type", [
+WAVE_TYPES = [
     "Sample & Hold",
     "Stepped Random",
     "White Noise",
@@ -12,23 +18,44 @@ from utils.providers import RngProvider
     "Blue Noise",
     "Violet Noise",
     "Grey Noise"
-])
-def test_deterministic_wave_generation(wave_type):
-    seed = 42
-    rng1 = RngProvider(seed=seed)
-    rng2 = RngProvider(seed=seed)
+]
 
-    wave1 = gen_wave(wave_type, rng=rng1)
-    wave2 = gen_wave(wave_type, rng=rng2)
+class TestDeterminism(unittest.TestCase):
+    def test_deterministic_wave_generation(self):
+        seed = 42
+        for wave_type in WAVE_TYPES:
+            with self.subTest(wave_type=wave_type):
+                rng1 = RngProvider(seed=seed)
+                rng2 = RngProvider(seed=seed)
 
-    assert np.array_equal(wave1, wave2), f"Waveform {wave_type} is not deterministic with seed {seed}"
+                wave1 = gen_wave(wave_type, rng=rng1)
+                wave2 = gen_wave(wave_type, rng=rng2)
 
-def test_different_seeds_produce_different_waves():
-    wave_type = "White Noise"
-    rng1 = RngProvider(seed=42)
-    rng2 = RngProvider(seed=43)
+                if HAS_NUMPY:
+                    self.assertTrue(
+                        np.array_equal(wave1, wave2),
+                        f"Waveform {wave_type} is not deterministic with seed {seed}"
+                    )
+                else:
+                    self.assertEqual(
+                        wave1, wave2,
+                        f"Waveform {wave_type} is not deterministic with seed {seed}"
+                    )
 
-    wave1 = gen_wave(wave_type, rng=rng1)
-    wave2 = gen_wave(wave_type, rng=rng2)
+    def test_different_seeds_produce_different_waves(self):
+        if not HAS_NUMPY:
+            self.skipTest("Numpy not installed for array inequality test")
+        wave_type = "White Noise"
+        rng1 = RngProvider(seed=42)
+        rng2 = RngProvider(seed=43)
 
-    assert not np.array_equal(wave1, wave2), "Different seeds produced the same waveform"
+        wave1 = gen_wave(wave_type, rng=rng1)
+        wave2 = gen_wave(wave_type, rng=rng2)
+
+        self.assertFalse(
+            np.array_equal(wave1, wave2),
+            "Different seeds produced the same waveform"
+        )
+
+if __name__ == '__main__':
+    unittest.main()
