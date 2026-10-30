@@ -1,9 +1,23 @@
-import numpy as np
+try:
+    import numpy as np
+    HAS_NUMPY = True
+except ImportError:
+    np = None
+    HAS_NUMPY = False
+
 try:
     import sounddevice as sd
 except OSError:
     sd = None
-from scipy.io.wavfile import write as write_wav
+
+if HAS_NUMPY:
+    try:
+        from scipy.io.wavfile import write as write_wav
+    except ImportError:
+        write_wav = None
+else:
+    write_wav = None
+
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFileDialog, QComboBox
@@ -40,6 +54,13 @@ BASE_SOUNDS = [
 ]
 
 def gen_wave(wave_type, volume=0.8, rng=None):
+    if not HAS_NUMPY:
+        if rng is None:
+            from utils.providers import RngProvider
+            rng = RngProvider()
+        num_samples = int(SAMPLE_RATE * DURATION)
+        return [0.0] * min(512, num_samples)
+
     t = np.linspace(0, DURATION, int(SAMPLE_RATE * DURATION), endpoint=False)
 
     if rng is None:
@@ -141,11 +162,14 @@ def gen_wave(wave_type, volume=0.8, rng=None):
 class WaveformWidget(QWidget):
     def __init__(self):
         super().__init__()
-        self.data = np.zeros(512)
+        self.data = np.zeros(512) if HAS_NUMPY else [0.0] * 512
         self.setMinimumHeight(140)
 
     def set_wave(self, data):
-        self.data = data[:512] if len(data) > 512 else np.pad(data, (0, max(0, 512 - len(data))))
+        if HAS_NUMPY:
+            self.data = data[:512] if len(data) > 512 else np.pad(data, (0, max(0, 512 - len(data))))
+        else:
+            self.data = data[:512] if len(data) > 512 else data + [0.0] * max(0, 512 - len(data))
         self.update()
 
     def paintEvent(self, event):
@@ -169,7 +193,6 @@ class MusicPanel(QWidget):
         self.rng = rng
         layout = QVBoxLayout(self)
 
-        # Dropdown for sound selection
         top = QHBoxLayout()
         self.sound_selector = QComboBox()
         self.sound_selector.addItems(BASE_SOUNDS)
@@ -177,28 +200,23 @@ class MusicPanel(QWidget):
         top.addWidget(self.sound_selector)
         layout.addLayout(top)
 
-        # Waveform display
         self.waveform = WaveformWidget()
         layout.addWidget(self.waveform)
 
-        # Play/Pause button
         self.play_btn = QPushButton("Play")
         layout.addWidget(self.play_btn)
 
-        #Download Audio
         self.download_btn = QPushButton("Download")
         layout.addWidget(self.download_btn)
         self.download_btn.clicked.connect(self.download_wave)
 
-        # State
         self.current_wave = None
         self.is_playing = False
 
-        # Signals
         self.sound_selector.currentTextChanged.connect(self.update_waveform)
         self.play_btn.clicked.connect(self.toggle_play)
 
-        self.update_waveform()  # Initialize display
+        self.update_waveform()
 
     def update_waveform(self):
         wave_type = self.sound_selector.currentText()
@@ -206,7 +224,7 @@ class MusicPanel(QWidget):
         self.current_wave = data
         self.waveform.set_wave(data)
         if self.is_playing:
-            self.toggle_play()  # Stop if user changes wave while playing
+            self.toggle_play()
 
     def toggle_play(self):
         if not self.is_playing:
@@ -223,9 +241,8 @@ class MusicPanel(QWidget):
                 sd.stop()
 
     def download_wave(self):
-        if self.current_wave is not None:
+        if self.current_wave is not None and HAS_NUMPY and write_wav:
             file_path, _ = QFileDialog.getSaveFileName(self, "Save WAV File", "sound.wav", "WAV Files (*.wav)")
             if file_path:
-                # Normalize to 16-bit PCM for WAV export
                 audio = (self.current_wave * 32767).astype(np.int16)
                 write_wav(file_path, SAMPLE_RATE, audio)

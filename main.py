@@ -95,18 +95,18 @@ def watch_loop():
                     clear_input_file(input_file)
                     print(f"[{timestamp}] Parsing complete. Cleared toSequence.txt.\n")
                 except Exception as e:
-                    # Classify errors
-                    from utils.dna_ui import DNAProcessingError
-                    if isinstance(e, DNAProcessingError):
+                    from utils.dna_ui import DNAProcessingError, ThermalOverloadError
+                    if isinstance(e, ThermalOverloadError):
+                        print(f"[{timestamp}][Watcher][REFUSAL] {e.refusal_reason}: {e}. Next action: {e.next_action_hint}")
+                    elif isinstance(e, DNAProcessingError):
                         print(f"[{timestamp}][Watcher][CRITICAL] DNA processing failed: {e}")
                     else:
                         print(f"[{timestamp}][Watcher][ERROR] Unexpected error: {e}")
-                    # In case of error, we DO NOT clear the input file so we can retry or investigate
+                    # In case of error/refusal, we DO NOT clear the input file so we can retry or investigate
 
                 # Reset last_content so we’ll catch the next chunk of DNA
                 last_content = ""
             else:
-                # If the file is now empty, keep last_content = ""
                 if not current_content.strip():
                     last_content = ""
 
@@ -141,8 +141,10 @@ def process_once():
         run_batch()
         print("[Once‐Runner] Done.")
     except Exception as e:
-        from utils.dna_ui import DNAProcessingError
-        if isinstance(e, DNAProcessingError):
+        from utils.dna_ui import DNAProcessingError, ThermalOverloadError
+        if isinstance(e, ThermalOverloadError):
+            print(f"[Once‐Runner][REFUSAL] {e.refusal_reason}: {e}. Next action: {e.next_action_hint}")
+        elif isinstance(e, DNAProcessingError):
             print(f"[Once‐Runner][CRITICAL] DNA processing failed: {e}")
         else:
             print(f"[Once‐Runner][ERROR] Unexpected error: {e}")
@@ -165,24 +167,19 @@ def main():
     args = parser.parse_args()
 
     if args.once:
-        # Run batch a single time, then exit
         process_once()
         return
 
-    # Otherwise: start watcher, then launch GUI
     watcher_thread = threading.Thread(target=watch_loop, daemon=True)
     watcher_thread.start()
     print("[main.py] Watcher thread started in background.")
 
-    # Launch PySide6 GUI
-    # Ensure working directory is project root
     script_dir = os.path.dirname(os.path.abspath(__file__))
     os.chdir(script_dir)
 
     app = QApplication(sys.argv)
 
-    # Initialize Determinism Providers
-    rng = RngProvider()  # Default non-deterministic for normal usage, or seed if needed
+    rng = RngProvider()
 
     win = MainWindow(rng=rng)
     win.show()
