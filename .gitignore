@@ -49,3 +49,6 @@ docs/vision.md
 docs/design_notes/principles.md
 research/datasets.md
 research/papers.md
+*.egg-info/
+build/
+dist/
