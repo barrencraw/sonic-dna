@@ -1,4 +1,7 @@
-# Ignore Python venvs
+# Ignore Python build artifacts and venvs
+*.egg-info/
+build/
+dist/
 sounddna-venv/
 toongloom-venv/
 venv/
