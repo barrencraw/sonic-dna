@@ -52,7 +52,8 @@ class TestAtomicity(unittest.TestCase):
 
     def tearDown(self):
         os.chdir(self.old_cwd)
-        shutil.rmtree(self.test_dir)
+        if os.path.exists(self.test_dir):
+            shutil.rmtree(self.test_dir)
 
     def test_successful_parsing(self):
         """Verify that parsing works correctly under normal conditions."""
@@ -95,18 +96,18 @@ class TestAtomicity(unittest.TestCase):
 
     def test_watcher_behavior_on_failure(self):
         """Test main.py's logic: if run_batch fails, input file should NOT be cleared."""
-        # Force import after mocks
         if 'main' in sys.modules:
             del sys.modules['main']
         import main
 
-        # We'll mock run_batch to fail
-        with patch('main.run_batch', side_effect=PersistenceError("Failed")):
-            with patch('main.clear_input_file') as mock_clear:
-                with self.assertRaises(SystemExit): # process_once calls sys.exit(1) on failure
-                    main.process_once()
-
-                mock_clear.assert_not_called()
+        sandbox_main_file = os.path.join(self.test_dir, 'main.py')
+        with patch.object(main, '__file__', sandbox_main_file):
+            with patch('main.run_batch', side_effect=PersistenceError("Failed")):
+                with patch('main.clear_input_file') as mock_clear:
+                    with self.assertRaises(SystemExit) as cm:
+                        main.process_once()
+                    self.assertEqual(cm.exception.code, 1)
+                    mock_clear.assert_not_called()
 
         # Verify file still has content
         with open(self.input_file, 'r') as f:
