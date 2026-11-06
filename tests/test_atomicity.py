@@ -1,7 +1,7 @@
 import sys
 from unittest.mock import MagicMock
 
-# Mock dependencies before any imports
+# Mock GUI and audio dependencies before imports
 mock_pyside6 = MagicMock()
 sys.modules["PySide6"] = mock_pyside6
 sys.modules["PySide6.QtWidgets"] = mock_pyside6
@@ -60,14 +60,21 @@ class TestAtomicity(unittest.TestCase):
 
         json_out = os.path.join(self.output_dir, 'toSequence_parsed.json')
         csv_out = os.path.join(self.output_dir, 'toSequence_parsed.csv')
+        ledger_out = os.path.join(self.data_dir, 'processed_ledger.json')
 
         self.assertTrue(os.path.exists(json_out))
         self.assertTrue(os.path.exists(csv_out))
+        self.assertTrue(os.path.exists(ledger_out))
 
         with open(json_out, 'r') as f:
             data = json.load(f)
             self.assertEqual(len(data), 1)
             self.assertEqual(data[0]['dna'], 'V100')
+
+        with open(ledger_out, 'r') as f:
+            ledger = json.load(f)
+            self.assertIn('V100', ledger)
+            self.assertEqual(ledger['V100']['terminal_outcome'], 'success')
 
     def test_crash_during_json_write(self):
         """Simulate a crash during JSON writing. No output files should be created."""
@@ -77,9 +84,11 @@ class TestAtomicity(unittest.TestCase):
 
         json_out = os.path.join(self.output_dir, 'toSequence_parsed.json')
         csv_out = os.path.join(self.output_dir, 'toSequence_parsed.csv')
+        ledger_out = os.path.join(self.data_dir, 'processed_ledger.json')
 
         self.assertFalse(os.path.exists(json_out))
         self.assertFalse(os.path.exists(csv_out))
+        self.assertFalse(os.path.exists(ledger_out))
 
     def test_crash_during_rename(self):
         """Simulate a crash/failure during the atomic rename. No output files should be created/updated."""
@@ -89,16 +98,18 @@ class TestAtomicity(unittest.TestCase):
 
         json_out = os.path.join(self.output_dir, 'toSequence_parsed.json')
         csv_out = os.path.join(self.output_dir, 'toSequence_parsed.csv')
+        ledger_out = os.path.join(self.data_dir, 'processed_ledger.json')
 
         self.assertFalse(os.path.exists(json_out))
         self.assertFalse(os.path.exists(csv_out))
+        self.assertFalse(os.path.exists(ledger_out))
 
     def test_watcher_behavior_on_failure(self):
         """Test main.py's logic: if run_batch fails, input file should NOT be cleared."""
-        # Force import after mocks
         if 'main' in sys.modules:
             del sys.modules['main']
         import main
+        main.__file__ = os.path.join(self.test_dir, 'main.py')
 
         # We'll mock run_batch to fail
         with patch('main.run_batch', side_effect=PersistenceError("Failed")):
