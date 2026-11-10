@@ -24,5 +24,3 @@ setup(
     description="SonicDNA and generative music app.",
     python_requires=">=3.10",
 )
-
-)
