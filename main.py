@@ -30,6 +30,7 @@ Directory layout (relative to where this main.py lives):
 import os
 import sys
 import time
+import uuid
 import threading
 import argparse
 
@@ -87,10 +88,11 @@ def watch_loop():
             # If there’s new non‐empty content that differs from last run, process it:
             if current_content.strip() and current_content != last_content:
                 timestamp = time.strftime('%Y-%m-%d %H:%M:%S')
-                print(f"[{timestamp}] New DNA detected → running parser…")
+                correlation_id = str(uuid.uuid4())
+                print(f"[{timestamp}] New DNA detected → running parser (cid: {correlation_id})…")
 
                 try:
-                    run_batch()
+                    run_batch(correlation_id=correlation_id)
                     # Only clear the input file if run_batch() succeeds
                     clear_input_file(input_file)
                     print(f"[{timestamp}] Parsing complete. Cleared toSequence.txt.\n")
@@ -98,9 +100,9 @@ def watch_loop():
                     # Classify errors
                     from utils.dna_ui import DNAProcessingError
                     if isinstance(e, DNAProcessingError):
-                        print(f"[{timestamp}][Watcher][CRITICAL] DNA processing failed: {e}")
+                        print(f"[{timestamp}][Watcher][CRITICAL] DNA processing failed: {e} (cid: {correlation_id})")
                     else:
-                        print(f"[{timestamp}][Watcher][ERROR] Unexpected error: {e}")
+                        print(f"[{timestamp}][Watcher][ERROR] Unexpected error: {e} (cid: {correlation_id})")
                     # In case of error, we DO NOT clear the input file so we can retry or investigate
 
                 # Reset last_content so we’ll catch the next chunk of DNA
@@ -136,16 +138,17 @@ def process_once():
         print(f"[ERROR] Input file not found: {input_file}")
         return
 
-    print("[Once‐Runner] Processing all DNA strings once…")
+    correlation_id = str(uuid.uuid4())
+    print(f"[Once‐Runner] Processing all DNA strings once (cid: {correlation_id})…")
     try:
-        run_batch()
+        run_batch(correlation_id=correlation_id)
         print("[Once‐Runner] Done.")
     except Exception as e:
         from utils.dna_ui import DNAProcessingError
         if isinstance(e, DNAProcessingError):
-            print(f"[Once‐Runner][CRITICAL] DNA processing failed: {e}")
+            print(f"[Once‐Runner][CRITICAL] DNA processing failed: {e} (cid: {correlation_id})")
         else:
-            print(f"[Once‐Runner][ERROR] Unexpected error: {e}")
+            print(f"[Once‐Runner][ERROR] Unexpected error: {e} (cid: {correlation_id})")
         sys.exit(1)
 
 # ─── MAIN ENTRYPOINT ───────────────────────────────────────────────────────────
